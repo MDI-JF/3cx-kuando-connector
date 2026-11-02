@@ -8,7 +8,6 @@ internal sealed class SettingsForm : Form
     private readonly TextBox _client = new() { Width = 300 };
     private readonly TextBox _secret = new() { Width = 300, UseSystemPasswordChar = true };
     private readonly TextBox _extension = new() { Width = 300 };
-    private readonly TextBox _kuando = new() { Width = 300 };
     private readonly NumericUpDown _poll = new() { Width = 100, Minimum = 2, Maximum = 60 };
     private readonly CheckBox _autostart = new() { Text = "Start with Windows sign-in", AutoSize = true };
     private readonly Label _hint = new() { AutoSize = true, MaximumSize = new Size(490, 0), Text = "Enter a new secret to replace the stored one. It is encrypted for the current Windows user using DPAPI." };
@@ -29,7 +28,6 @@ internal sealed class SettingsForm : Form
         _extension.Text = settings.Extension;
         _poll.Value = Math.Clamp(settings.PollSeconds, 2, 60);
         _autostart.Checked = settings.StartAtLogin;
-        _kuando.Text = settings.KuandoUrlOverride ?? "";
 
         var layout = new TableLayoutPanel
         {
@@ -46,7 +44,6 @@ internal sealed class SettingsForm : Form
         AddRow(layout, "API Client Secret", _secret);
         AddRow(layout, "Extension", _extension);
         AddRow(layout, "Presence polling (seconds)", _poll);
-        AddRow(layout, "kuandoHUB URL (optional)", _kuando);
         AddRow(layout, "", _autostart);
         AddRow(layout, "", _hint);
 
@@ -77,7 +74,6 @@ internal sealed class SettingsForm : Form
         _settings.ClientId = _client.Text.Trim();
         _settings.Extension = _extension.Text.Trim();
         _settings.PollSeconds = (int)_poll.Value;
-        _settings.KuandoUrlOverride = string.IsNullOrWhiteSpace(_kuando.Text) ? null : _kuando.Text.Trim();
         _settings.StartAtLogin = _autostart.Checked;
         try
         {
