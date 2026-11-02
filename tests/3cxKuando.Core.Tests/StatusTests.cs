@@ -30,12 +30,35 @@ public class StatusTests
     public void OnlyDeduplicatesConfirmedEvents()
     {
         var dedup = new EventDeduplicator();
-        Assert.True(dedup.ShouldSend("presence", "Away"));
-        dedup.MarkSent("presence", "Away");
-        Assert.False(dedup.ShouldSend("presence", "Away"));
-        Assert.True(dedup.ShouldSend("presence", "Available"));
+        Assert.True(dedup.ShouldSend(KuandoProtocol.Source, KuandoProtocol.PresenceEventType, "Away"));
+        dedup.MarkSent(KuandoProtocol.Source, KuandoProtocol.PresenceEventType, "Away");
+        Assert.False(dedup.ShouldSend(KuandoProtocol.Source, KuandoProtocol.PresenceEventType, "Away"));
+        Assert.True(dedup.ShouldSend(KuandoProtocol.Source, KuandoProtocol.PresenceEventType, "Available"));
         dedup.Reset();
-        Assert.True(dedup.ShouldSend("presence", "Away"));
+        Assert.True(dedup.ShouldSend(KuandoProtocol.Source, KuandoProtocol.PresenceEventType, "Away"));
+    }
+
+    [Fact]
+    public void SharedSenderDoesNotMixPresenceAndAlertDeduplication()
+    {
+        var dedup = new EventDeduplicator();
+        string sender = KuandoProtocol.Source;
+
+        dedup.MarkSent(sender, KuandoProtocol.PresenceEventType, "Away");
+        Assert.True(dedup.ShouldSend(sender, KuandoProtocol.CallEventType, "Away"));
+        dedup.MarkSent(sender, KuandoProtocol.CallEventType, "Away");
+
+        // An Alert update (including one with the same event name) cannot alter Presence.
+        Assert.False(dedup.ShouldSend(sender, KuandoProtocol.PresenceEventType, "Away"));
+        dedup.MarkSent(sender, KuandoProtocol.CallEventType, "Connected");
+        Assert.False(dedup.ShouldSend(sender, KuandoProtocol.PresenceEventType, "Away"));
+        Assert.False(dedup.ShouldSend(sender, KuandoProtocol.CallEventType, "Connected"));
+        Assert.True(dedup.ShouldSend(sender, KuandoProtocol.CallEventType, "Ringing"));
+
+        // A reconnection invalidates both checkpoints independently.
+        dedup.Reset();
+        Assert.True(dedup.ShouldSend(sender, KuandoProtocol.PresenceEventType, "Away"));
+        Assert.True(dedup.ShouldSend(sender, KuandoProtocol.CallEventType, "Connected"));
     }
 
     [Fact]
