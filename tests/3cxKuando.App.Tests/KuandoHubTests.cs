@@ -140,6 +140,17 @@ public sealed class KuandoHubTests
     }
 
     [Fact]
+    public async Task DisconnectedHubNeverAcknowledgesEndAlert()
+    {
+        var sdk = new RecordingSdk { IsHubConnected = false };
+        using var hub = Create(sdk);
+        await Assert.ThrowsAsync<InvalidOperationException>(
+            () => hub.SendCallAsync("Idle", CancellationToken.None));
+        Assert.Equal(0, sdk.Ends);
+        Assert.DoesNotContain("End Alert", sdk.Calls);
+    }
+
+    [Fact]
     public async Task FailedRegistrationRecoversAndRequestsStateReplay()
     {
         var sdk = new RecordingSdk { FailRegister = true };
