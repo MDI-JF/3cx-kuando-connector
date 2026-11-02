@@ -1,0 +1,21 @@
+name: SDK contract inspection
+on:
+  push:
+    branches: [research/sdk-contract]
+jobs:
+  introspect:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+      - name: Print SDK public contract
+        run: dotnet run --project sdk-inspect/sdk-inspect.csproj -c Release > sdk-contract.txt
+      - name: Display SDK contract
+        shell: pwsh
+        run: Get-Content sdk-contract.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: sdk-contract
+          path: sdk-contract.txt
