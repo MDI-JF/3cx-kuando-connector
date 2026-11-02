@@ -9,8 +9,7 @@ internal sealed class KuandoHub
     private readonly HttpClient _http;
     private readonly AppSettings _settings;
     private readonly Uri? _url;
-    private bool _registered;
-    private DateTimeOffset _lastCheck = DateTimeOffset.MinValue;
+    private readonly RegistrationLease _registration = new();
 
     public KuandoHub(HttpClient http, AppSettings settings, bool terminalSession)
     {
@@ -31,15 +30,14 @@ internal sealed class KuandoHub
     public async Task<bool> EnsureRegisteredAsync(CancellationToken ct)
     {
         if (_url is null) return false;
-        if (_registered && DateTimeOffset.UtcNow - _lastCheck < TimeSpan.FromSeconds(60)) return true;
+        if (!_registration.IsDue) return true;
         try
         {
             await PostAsync(KuandoProtocol.Register(KuandoProtocol.PresenceSource, _settings.EventStyles), "Register Presence", ct);
             await PostAsync(KuandoProtocol.Register(KuandoProtocol.CallSource, _settings.EventStyles), "Register Call", ct);
             await PostAsync(KuandoProtocol.InitialPriority(KuandoProtocol.PresenceSource), "CreateInitialPriority Presence", ct);
             await PostAsync(KuandoProtocol.InitialPriority(KuandoProtocol.CallSource), "CreateInitialPriority Call", ct);
-            _registered = true;
-            _lastCheck = DateTimeOffset.UtcNow;
+            _registration.Registered();
             // Reapply the last known states after a periodic re-registration: kuandoHUB
             // might have restarted without an intervening status event.
             RegistrationRecovered?.Invoke();
@@ -49,7 +47,7 @@ internal sealed class KuandoHub
         catch (Exception ex)
         {
             DiagnosticLog.Write("kuandoHUB registration failed", DiagnosticLog.SafeError(ex));
-            _registered = false;
+            _registration.Invalidate();
             return false;
         }
     }
@@ -63,7 +61,7 @@ internal sealed class KuandoHub
             await PostAsync(KuandoProtocol.Signal(KuandoProtocol.PresenceSource,
                 eventName, _settings.EventStyles[eventName]), "Presence " + eventName, ct);
         }
-        catch { _registered = false; throw; }
+        catch { _registration.Invalidate(); throw; }
     }
 
     public async Task SendCallAsync(string eventName, CancellationToken ct)
@@ -74,7 +72,7 @@ internal sealed class KuandoHub
                 KuandoProtocol.Signal(KuandoProtocol.CallSource, eventName, _settings.EventStyles[eventName]),
                 eventName == "Idle" ? "Call Off" : "Call " + eventName, ct);
         }
-        catch { _registered = false; throw; }
+        catch { _registration.Invalidate(); throw; }
     }
 
     private async Task PostAsync(string json, string operation, CancellationToken ct)
