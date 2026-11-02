@@ -1,4 +1,3 @@
-using System.Net.Http.Json;
 using System.Text;
 using Microsoft.Win32;
 using ThreeCxKuando.Core;
@@ -35,10 +34,10 @@ internal sealed class KuandoHub
         if (_registered && DateTimeOffset.UtcNow - _lastCheck < TimeSpan.FromSeconds(60)) return true;
         try
         {
-            await PostAsync(KuandoProtocol.Register(KuandoProtocol.PresenceSource, _settings.EventStyles), ct);
-            await PostAsync(KuandoProtocol.Register(KuandoProtocol.CallSource, _settings.EventStyles), ct);
-            await PostAsync(KuandoProtocol.InitialPriority(KuandoProtocol.PresenceSource), ct);
-            await PostAsync(KuandoProtocol.InitialPriority(KuandoProtocol.CallSource), ct);
+            await PostAsync(KuandoProtocol.Register(KuandoProtocol.PresenceSource, _settings.EventStyles), "Register Presence", ct);
+            await PostAsync(KuandoProtocol.Register(KuandoProtocol.CallSource, _settings.EventStyles), "Register Call", ct);
+            await PostAsync(KuandoProtocol.InitialPriority(KuandoProtocol.PresenceSource), "CreateInitialPriority Presence", ct);
+            await PostAsync(KuandoProtocol.InitialPriority(KuandoProtocol.CallSource), "CreateInitialPriority Call", ct);
             _registered = true;
             _lastCheck = DateTimeOffset.UtcNow;
             // Reapply the last known states after a periodic re-registration: kuandoHUB
@@ -46,8 +45,10 @@ internal sealed class KuandoHub
             RegistrationRecovered?.Invoke();
             return true;
         }
-        catch
+        catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
+        catch (Exception ex)
         {
+            DiagnosticLog.Write("kuandoHUB registration failed", DiagnosticLog.SafeError(ex));
             _registered = false;
             return false;
         }
@@ -57,23 +58,43 @@ internal sealed class KuandoHub
 
     public async Task SendPresenceAsync(string eventName, CancellationToken ct)
     {
-        try { await PostAsync(KuandoProtocol.Signal(KuandoProtocol.PresenceSource,
-            eventName, _settings.EventStyles[eventName]), ct); }
+        try
+        {
+            await PostAsync(KuandoProtocol.Signal(KuandoProtocol.PresenceSource,
+                eventName, _settings.EventStyles[eventName]), "Presence " + eventName, ct);
+        }
         catch { _registered = false; throw; }
     }
 
     public async Task SendCallAsync(string eventName, CancellationToken ct)
     {
-        try { await PostAsync(eventName == "Idle" ? KuandoProtocol.OffCall() :
-            KuandoProtocol.Signal(KuandoProtocol.CallSource, eventName, _settings.EventStyles[eventName]), ct); }
+        try
+        {
+            await PostAsync(eventName == "Idle" ? KuandoProtocol.OffCall() :
+                KuandoProtocol.Signal(KuandoProtocol.CallSource, eventName, _settings.EventStyles[eventName]),
+                eventName == "Idle" ? "Call Off" : "Call " + eventName, ct);
+        }
         catch { _registered = false; throw; }
     }
 
-    private async Task PostAsync(string json, CancellationToken ct)
+    private async Task PostAsync(string json, string operation, CancellationToken ct)
     {
         if (_url is null) throw new InvalidOperationException("kuandoHUB-Port nicht ermittelbar.");
-        using var content = new StringContent(json, Encoding.UTF8, "application/json");
-        using var response = await _http.PostAsync(_url, content, ct);
-        response.EnsureSuccessStatusCode();
+        try
+        {
+            using var content = new StringContent(json, Encoding.UTF8, "application/json");
+            using var response = await _http.PostAsync(_url, content, ct);
+            DiagnosticLog.Write("kuandoHUB HTTP",
+                operation + " -> HTTP " + (int)response.StatusCode);
+            response.EnsureSuccessStatusCode();
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
+        catch (Exception ex)
+        {
+            // Operation and local port only: never write API secret, access token or POST body.
+            DiagnosticLog.Write("kuandoHUB HTTP error",
+                operation + " @ " + _url.Host + ":" + _url.Port + " -> " + DiagnosticLog.SafeError(ex));
+            throw;
+        }
     }
 }

@@ -48,6 +48,8 @@ internal sealed class UserSettingsStore
         ConfigureAutostart(settings.StartAtLogin);
     }
 
+    public void RefreshAutostart(bool enabled) => ConfigureAutostart(enabled);
+
     private static void ConfigureAutostart(bool enabled)
     {
         using var key = Registry.CurrentUser.CreateSubKey(@"Software\Microsoft\Windows\CurrentVersion\Run");

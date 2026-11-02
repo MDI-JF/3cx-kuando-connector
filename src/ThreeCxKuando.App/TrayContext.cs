@@ -19,6 +19,7 @@ internal sealed class TrayContext : ApplicationContext
     private string _lastCall = "unbekannt";
     private string _lastCallSent = "noch nichts";
     private string _lastError = "";
+    private string _lastDiagnosticHealth = "";
 
     public TrayContext()
     {
@@ -40,8 +41,18 @@ internal sealed class TrayContext : ApplicationContext
         _tray.DoubleClick += (_, _) => OpenSettings();
         _displayTimer.Tick += (_, _) => UpdateStatus();
         _displayTimer.Start();
-        try { _settings = _store.Load(); }
-        catch (Exception e) { ShowError("Einstellungen konnten nicht gelesen werden: " + e.Message); }
+        DiagnosticLog.Write("Connector", "Started");
+        try
+        {
+            _settings = _store.Load();
+            if (!string.IsNullOrWhiteSpace(_settings.PbxUrl))
+                _store.RefreshAutostart(_settings.StartAtLogin);
+        }
+        catch (Exception e)
+        {
+            ShowError("Einstellungen konnten nicht gelesen werden: " + e.Message);
+            DiagnosticLog.Write("Configuration error", DiagnosticLog.SafeError(e));
+        }
         if (string.IsNullOrWhiteSpace(_settings.PbxUrl) || !_store.HasSecret)
             OpenSettings();
         else StartMonitor();
@@ -128,6 +139,8 @@ internal sealed class TrayContext : ApplicationContext
                     presenceValue = StatusLogic.NormalizePresence(presence.Profile);
                     if (presenceValue.Length == 0)
                         throw new InvalidOperationException("Unbekanntes 3CX-Präsenzprofil: " + presence.Profile);
+                    if (_lastPresence != presenceValue)
+                        DiagnosticLog.Write("3CX Presence detected", presenceValue);
                     _lastPresence = presenceValue;
                 }
                 catch (OperationCanceledException) when (ct.IsCancellationRequested) { break; }
@@ -156,26 +169,52 @@ internal sealed class TrayContext : ApplicationContext
                 {
                     if (await hub.EnsureRegisteredAsync(ct))
                     {
+                        // Never let a failed presence POST suppress the pending Call Off.
                         if (presenceValue is not null &&
                             dedup.ShouldSend(KuandoProtocol.PresenceSource, presenceValue))
                         {
-                            await hub.SendPresenceAsync(presenceValue, ct);
-                            dedup.MarkSent(KuandoProtocol.PresenceSource, presenceValue);
+                            try
+                            {
+                                await hub.SendPresenceAsync(presenceValue, ct);
+                                dedup.MarkSent(KuandoProtocol.PresenceSource, presenceValue);
+                            }
+                            catch (OperationCanceledException) when (ct.IsCancellationRequested) { break; }
+                            catch (Exception ex)
+                            {
+                                problems.Add("kuandoHUB Presence: " + DiagnosticLog.SafeError(ex));
+                            }
                         }
                         if (callValue is not null && callEvents.ShouldPublish(callValue))
                         {
-                            await hub.SendCallAsync(callValue, ct);
-                            callEvents.MarkPublished(callValue); // never mark a failed HTTP request
-                            _lastCallSent = callValue == "Idle" ? "Off" : callValue;
-                            DiagnosticLog.Write("kuandoHUB 3CX Call sent", _lastCallSent);
+                            try
+                            {
+                                await hub.SendCallAsync(callValue, ct);
+                                callEvents.MarkPublished(callValue); // successful POST only
+                                _lastCallSent = callValue == "Idle" ? "Off" : callValue;
+                                DiagnosticLog.Write("kuandoHUB 3CX Call sent", _lastCallSent);
+                            }
+                            catch (OperationCanceledException) when (ct.IsCancellationRequested) { break; }
+                            catch (Exception ex)
+                            {
+                                problems.Add("kuandoHUB Call: " + DiagnosticLog.SafeError(ex));
+                            }
                         }
                     }
                     else problems.Add("kuandoHUB nicht erreichbar: " + hub.EndpointLabel);
                 }
                 catch (OperationCanceledException) when (ct.IsCancellationRequested) { break; }
-                catch (Exception ex) { problems.Add("kuandoHUB: " + ex.Message); }
+                catch (Exception ex) { problems.Add("kuandoHUB: " + DiagnosticLog.SafeError(ex)); }
 
                 _lastError = string.Join(" | ", problems);
+                var health = problems.Count == 0 ? "Connected" :
+                    string.Join(" | ", problems.Select(problem =>
+                        problem.StartsWith("kuandoHUB", StringComparison.Ordinal) ?
+                        problem : problem.Split(':')[0]));
+                if (health != _lastDiagnosticHealth)
+                {
+                    DiagnosticLog.Write("Health", health);
+                    _lastDiagnosticHealth = health;
+                }
                 // Never send an artificial Off/unknown color when 3CX cannot be read.
                 await Task.Delay(TimeSpan.FromSeconds(settings.PollSeconds), ct);
             }
@@ -186,6 +225,7 @@ internal sealed class TrayContext : ApplicationContext
 
     protected override void ExitThreadCore()
     {
+        DiagnosticLog.Write("Connector", "Stopped");
         _lifetime.Cancel();
         _monitorCancel?.Cancel();
         _displayTimer.Stop();

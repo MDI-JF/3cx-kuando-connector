@@ -37,6 +37,11 @@ jobs:
           if-no-files-found: warn
       - name: Publish self-contained Windows application
         run: dotnet publish src/ThreeCxKuando.App/ThreeCxKuando.App.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -p:DebugType=None -o artifacts/publish
+      - name: Verify executable name
+        shell: pwsh
+        run: |
+          if (-not (Test-Path 'artifacts/publish/3cxKuando.exe')) { throw '3cxKuando.exe missing' }
+          if (Test-Path 'artifacts/publish/ThreeCxKuando.exe') { throw 'Legacy exe unexpectedly present' }
       - name: Compile installer with Inno Setup
         shell: pwsh
         run: |

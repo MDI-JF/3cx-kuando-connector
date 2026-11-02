@@ -1,4 +1,6 @@
 using System.Diagnostics;
+using System.Net.Http;
+using System.Net.Sockets;
 using System.Text;
 
 namespace ThreeCxKuando.App;
@@ -28,6 +30,20 @@ internal static class DiagnosticLog
             }
         }
         catch { /* Diagnostic logging must never disrupt call monitoring. */ }
+    }
+
+    public static string SafeError(Exception error)
+    {
+        if (error is HttpRequestException { StatusCode: { } status })
+            return "HTTP " + (int)status;
+        if (error is HttpRequestException http &&
+            http.InnerException is SocketException socket)
+            return "Socket " + socket.SocketErrorCode;
+        if (error is SocketException directSocket)
+            return "Socket " + directSocket.SocketErrorCode;
+        if (error is TaskCanceledException)
+            return "HTTP timeout";
+        return error.GetType().Name;
     }
 
     public static void Open()

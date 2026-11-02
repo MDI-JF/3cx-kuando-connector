@@ -56,3 +56,15 @@ All settings are per user. API secret storage uses DPAPI CurrentUser. A user wit
 ## Testing notes
 
 The automated tests cover foundational state, validation and protocol behaviors. Complete coverage of WinForms, DPAPI, WebSocket, installation and hardware interaction remains future work; the current project **does not claim 100% line coverage**.
+
+## Diagnostics
+
+From the tray menu select **Diagnoseprotokoll öffnen**. Per-user/per-session logs are
+stored at `%LOCALAPPDATA%\3CXKuandoConnector\events-session-<session-ID>.log`.
+The previous log is rotated as `.log.old` after about 512 KB.
+
+The log includes 3CX state changes, local kuandoHUB POST operations and their HTTP
+status (or exception class/socket code), registration failures and connection-health changes.
+Sensitive credentials, raw API payloads, token values, and caller details are not logged.
+
+The executable is `3cxKuando.exe` (formerly `ThreeCxKuando.exe`).

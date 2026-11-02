@@ -5,7 +5,7 @@
     <UseWindowsForms>true</UseWindowsForms>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
-    <AssemblyName>ThreeCxKuando</AssemblyName>
+    <AssemblyName>3cxKuando</AssemblyName>
     <ApplicationTitle>3CX kuando Connector</ApplicationTitle>
   </PropertyGroup>
   <ItemGroup>
