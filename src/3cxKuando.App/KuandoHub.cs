@@ -91,6 +91,11 @@ internal sealed class KuandoHub : IDisposable
         ct.ThrowIfCancellationRequested();
         ThrowIfDisposed();
         if (eventName != "Idle") return SendAsync(HubEvents.Alert, eventName, ct);
+        if (!IsConnected)
+        {
+            _registration.Invalidate();
+            throw new InvalidOperationException("kuandoHUB SDK is not connected.");
+        }
         try
         {
             _sdk.EndAlert();
