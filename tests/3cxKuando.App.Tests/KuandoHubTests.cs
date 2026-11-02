@@ -1,5 +1,4 @@
-using System.Net;
-using System.Text.Json;
+using Busylight;
 using KuandoConnector.App;
 using KuandoConnector.Core;
 using Xunit;
@@ -14,134 +13,200 @@ public sealed class KuandoHubTests
         public override DateTimeOffset GetUtcNow() => Now;
     }
 
-    private sealed class Handler : HttpMessageHandler
+    private sealed class RecordingSdk : IHubSdk
     {
-        public readonly List<string> Actions = new();
-        public readonly List<string> Payloads = new();
-        public readonly List<bool?> ConnectionClose = new();
-        public bool FailNext;
-        public bool TimeoutNext;
+        public bool IsHubConnected { get; set; } = true;
+        public bool FailRegister, FailNextEffect, FailEnd;
+        public bool Disposed;
+        public readonly List<BusylightHubDataSourceParameter> Sources = [];
+        public readonly List<BusylightHubPriorityParameter> Priorities = [];
+        public readonly List<(string Type, string Name, LightStyle Style)> Effects = [];
+        public readonly List<string> Calls = [];
+        public int Ends;
 
-        protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken ct)
+        public void RegisterDataSource(BusylightHubDataSourceParameter def)
         {
-            string body = await request.Content!.ReadAsStringAsync(ct);
-            using var doc = JsonDocument.Parse(body);
-            string action = doc.RootElement.GetProperty("action").GetString()!;
-            Actions.Add(action);
-            Payloads.Add(body);
-            ConnectionClose.Add(request.Headers.ConnectionClose);
-            if (TimeoutNext)
-            {
-                TimeoutNext = false;
-                throw new TaskCanceledException("Simulated HTTP timeout");
-            }
-            if (FailNext)
-            {
-                FailNext = false;
-                return new HttpResponseMessage(HttpStatusCode.ServiceUnavailable);
-            }
-            return new HttpResponseMessage(HttpStatusCode.OK);
+            Calls.Add("Register");
+            if (FailRegister) { FailRegister = false; throw new InvalidOperationException("register failed"); }
+            Sources.Add(def);
         }
+        public void CreateInitialPriority(BusylightHubPriorityParameter priority)
+        {
+            Calls.Add("Priority " + priority.eventtype);
+            Priorities.Add(priority);
+        }
+        public void Send(string type, string name, LightStyle style)
+        {
+            Calls.Add(type + " " + name);
+            if (FailNextEffect) { FailNextEffect = false; throw new InvalidOperationException("effect failed"); }
+            Effects.Add((type, name, style));
+        }
+        public void EndAlert()
+        {
+            Calls.Add("End Alert");
+            if (FailEnd) { FailEnd = false; throw new InvalidOperationException("end failed"); }
+            Ends++;
+        }
+        public void Dispose() => Disposed = true;
     }
 
-    private static KuandoHub Create(Handler handler, RegistrationLease lease) =>
-        new(new HttpClient(handler) { Timeout = TimeSpan.FromSeconds(3) },
-            new AppSettings(),
-            new Uri("http://localhost:8989/"), lease);
+    private static KuandoHub Create(RecordingSdk sdk, RegistrationLease? lease = null, AppSettings? settings = null)
+        => new(sdk, settings ?? new AppSettings(), lease ?? new RegistrationLease());
 
     [Fact]
-    public async Task RegisteredSourcesAreNotResentOnEveryPresencePoll()
+    public async Task RegistersExactlyOneSourceWithTwoIndependentEventTypes()
     {
+        var sdk = new RecordingSdk();
+        using var hub = Create(sdk);
+        Assert.True(await hub.EnsureRegisteredAsync(CancellationToken.None));
+        var source = Assert.Single(sdk.Sources);
+        Assert.Equal(HubEvents.Source, source.DataSourceName);
+        Assert.Equal(2, source.eventnames.Count);
+        Assert.Equal(HubEvents.PresenceNames, source.eventnames[HubEvents.Presence].EventNames);
+        Assert.Equal(HubEvents.CallNames, source.eventnames[HubEvents.Alert].EventNames);
+        Assert.DoesNotContain("Off", source.eventnames[HubEvents.Alert].EventNames);
+        Assert.All(source.eventnames.Values, type => Assert.False(type.IsAlertPriority));
+        Assert.Equal(new[] { HubEvents.Presence, HubEvents.Alert }, sdk.Priorities.Select(p => p.eventtype));
+        Assert.All(sdk.Priorities, p =>
+        {
+            Assert.Equal(HubEvents.Source, p.sender);
+            Assert.True(p.enabled);
+            Assert.Empty(p.eventnames);
+            Assert.False(p.IsAlertPriority);
+        });
+        Assert.Equal(new[] { "Register", "Priority Presence", "Priority Alert" }, sdk.Calls);
+    }
+
+    [Fact]
+    public async Task RefreshDoesNotReRegisterAtEveryPoll()
+    {
+        var sdk = new RecordingSdk();
         var clock = new Clock();
-        var handler = new Handler();
-        var hub = Create(handler, new RegistrationLease(clock));
+        using var hub = Create(sdk, new RegistrationLease(clock));
         Assert.True(await hub.EnsureRegisteredAsync(CancellationToken.None));
-        Assert.Equal(3, handler.Actions.Count);
         Assert.True(await hub.EnsureRegisteredAsync(CancellationToken.None));
-        Assert.Equal(3, handler.Actions.Count);
         clock.Now += TimeSpan.FromMinutes(1);
         Assert.True(await hub.EnsureRegisteredAsync(CancellationToken.None));
-        Assert.Equal(3, handler.Actions.Count);
+        Assert.Single(sdk.Sources);
         clock.Now += TimeSpan.FromMinutes(14);
         Assert.True(await hub.EnsureRegisteredAsync(CancellationToken.None));
-        Assert.Equal(6, handler.Actions.Count);
+        Assert.Equal(2, sdk.Sources.Count);
     }
 
     [Fact]
-    public async Task HttpRequestsMatchValidatedPocAndCloseConnections()
+    public async Task SDKEffectsAlwaysRetainCorrectEventChannel()
     {
-        var handler = new Handler();
-        var hub = Create(handler, new RegistrationLease());
-        Assert.True(await hub.EnsureRegisteredAsync(CancellationToken.None));
+        var sdk = new RecordingSdk();
+        using var hub = Create(sdk);
         await hub.SendPresenceAsync("Available", CancellationToken.None);
         await hub.SendCallAsync("Ringing", CancellationToken.None);
+        await hub.SendCallAsync("Connected", CancellationToken.None);
+        await hub.SendCallAsync("Hold", CancellationToken.None);
+        await hub.SendCallAsync("Held", CancellationToken.None);
         await hub.SendCallAsync("Idle", CancellationToken.None);
-        Assert.Equal(new[] {
-            "RegisterDataSource", "CreateInitialPriority", "CreateInitialPriority",
-            "Light", "Blink", "Off"
-        }, handler.Actions);
-        Assert.All(handler.ConnectionClose, flag => Assert.True(flag));
-
-        using var register = JsonDocument.Parse(handler.Payloads[0]);
-        using var definition = JsonDocument.Parse(register.RootElement.GetProperty("parameter").GetString()!);
-        Assert.Equal(KuandoProtocol.Source, definition.RootElement.GetProperty("DataSourceName").GetString());
-        Assert.Equal(2, definition.RootElement.GetProperty("eventnames").EnumerateObject().Count());
-
-        using var presencePriority = JsonDocument.Parse(handler.Payloads[1]);
-        using var p = JsonDocument.Parse(presencePriority.RootElement.GetProperty("parameter").GetString()!);
-        Assert.Equal("Presence", p.RootElement.GetProperty("eventtype").GetString());
-        using var alertPriority = JsonDocument.Parse(handler.Payloads[2]);
-        using var a = JsonDocument.Parse(alertPriority.RootElement.GetProperty("parameter").GetString()!);
-        Assert.Equal("Alert", a.RootElement.GetProperty("eventtype").GetString());
-
-        foreach (var body in handler.Payloads.Skip(3))
-        {
-            using var message = JsonDocument.Parse(body);
-            Assert.Equal(KuandoProtocol.Source, message.RootElement.GetProperty("sender").GetString());
-        }
-        using var presence = JsonDocument.Parse(handler.Payloads[3]);
-        Assert.Equal("Presence", presence.RootElement.GetProperty("eventtype").GetString());
-        using var ringing = JsonDocument.Parse(handler.Payloads[4]);
-        Assert.Equal("Alert", ringing.RootElement.GetProperty("eventtype").GetString());
-        using var off = JsonDocument.Parse(handler.Payloads[5]);
-        Assert.Equal("Alert", off.RootElement.GetProperty("eventtype").GetString());
-        Assert.Equal("Off", off.RootElement.GetProperty("eventname").GetString());
+        Assert.Equal(5, sdk.Effects.Count);
+        Assert.Equal(HubEvents.Presence, sdk.Effects[0].Type);
+        Assert.Equal(("Available", "Light"), (sdk.Effects[0].Name, sdk.Effects[0].Style.Action));
+        Assert.All(sdk.Effects.Skip(1), e => Assert.Equal(HubEvents.Alert, e.Type));
+        Assert.Equal(("Ringing", "Blink"), (sdk.Effects[1].Name, sdk.Effects[1].Style.Action));
+        Assert.Equal(("Connected", "Light"), (sdk.Effects[2].Name, sdk.Effects[2].Style.Action));
+        Assert.Equal(("Hold", "Pulse"), (sdk.Effects[3].Name, sdk.Effects[3].Style.Action));
+        Assert.Equal(("Held", "Pulse"), (sdk.Effects[4].Name, sdk.Effects[4].Style.Action));
+        Assert.Equal(1, sdk.Ends);
     }
 
     [Fact]
-    public async Task FailedRegistrationCanRecoverOnNextPoll()
+    public async Task PreservesCustomUserStyles()
     {
-        var handler = new Handler { TimeoutNext = true };
-        var hub = Create(handler, new RegistrationLease());
+        var sdk = new RecordingSdk();
+        var settings = new AppSettings();
+        settings.EventStyles["Away"] = new LightStyle("Blink", 12, 34, 56);
+        using var hub = Create(sdk, settings: settings);
+        await hub.SendPresenceAsync("Away", CancellationToken.None);
+        var sent = Assert.Single(sdk.Effects);
+        Assert.Equal(HubEvents.Presence, sent.Type);
+        Assert.Equal(settings.EventStyles["Away"], sent.Style);
+    }
+
+    [Fact]
+    public async Task DisconnectedSdkDoesNotRegisterOrSendEffects()
+    {
+        var sdk = new RecordingSdk { IsHubConnected = false };
+        using var hub = Create(sdk);
+        Assert.False(await hub.EnsureRegisteredAsync(CancellationToken.None));
+        Assert.Empty(sdk.Sources);
+        await Assert.ThrowsAsync<InvalidOperationException>(
+            () => hub.SendPresenceAsync("Available", CancellationToken.None));
+    }
+
+    [Fact]
+    public async Task FailedRegistrationRecoversAndRequestsStateReplay()
+    {
+        var sdk = new RecordingSdk { FailRegister = true };
+        using var hub = Create(sdk);
+        var recovered = 0;
+        hub.RegistrationRecovered += () => recovered++;
         Assert.False(await hub.EnsureRegisteredAsync(CancellationToken.None));
         Assert.True(await hub.EnsureRegisteredAsync(CancellationToken.None));
-        Assert.Contains("RegisterDataSource", handler.Actions);
+        Assert.Equal(1, recovered);
+        Assert.Single(sdk.Sources);
     }
 
     [Fact]
-    public async Task CallOffCanBeSentWithoutWaitingForRegistrationRefresh()
+    public async Task FailedEffectForcesNewRegistration()
     {
-        var handler = new Handler { TimeoutNext = true };
-        var hub = Create(handler, new RegistrationLease());
-        Assert.False(await hub.EnsureRegisteredAsync(CancellationToken.None));
-        await hub.SendCallAsync("Idle", CancellationToken.None);
-        Assert.Equal("Off", handler.Actions.Last());
+        var sdk = new RecordingSdk();
+        using var hub = Create(sdk);
+        Assert.True(await hub.EnsureRegisteredAsync(CancellationToken.None));
+        sdk.FailNextEffect = true;
+        await Assert.ThrowsAsync<InvalidOperationException>(
+            () => hub.SendPresenceAsync("Away", CancellationToken.None));
+        Assert.True(await hub.EnsureRegisteredAsync(CancellationToken.None));
+        Assert.Equal(2, sdk.Sources.Count);
     }
 
     [Fact]
-    public async Task FailedOffPostDoesNotGetAcknowledgedAsDelivered()
+    public async Task AlertEndIsIndependentOfPresenceAndRetryable()
     {
-        var handler = new Handler { FailNext = true };
-        var hub = Create(handler, new RegistrationLease());
-        var state = new CallEventState();
-        state.MarkPublished("Connected");
-        Assert.True(state.ShouldPublish("Idle"));
-        await Assert.ThrowsAsync<HttpRequestException>(() =>
-            hub.SendCallAsync("Idle", CancellationToken.None));
-        Assert.True(state.ShouldPublish("Idle"));
+        var sdk = new RecordingSdk();
+        using var hub = Create(sdk);
+        await hub.SendPresenceAsync("Away", CancellationToken.None);
+        sdk.FailEnd = true;
+        var calls = new CallEventState();
+        calls.MarkPublished("Connected");
+        Assert.True(calls.ShouldPublish("Idle"));
+        await Assert.ThrowsAsync<InvalidOperationException>(
+            () => hub.SendCallAsync("Idle", CancellationToken.None));
+        Assert.True(calls.ShouldPublish("Idle"));
         await hub.SendCallAsync("Idle", CancellationToken.None);
-        state.MarkPublished("Idle");
-        Assert.False(state.ShouldPublish("Idle"));
-        Assert.Equal(2, handler.Actions.Count(a => a == "Off"));
+        calls.MarkPublished("Idle");
+        Assert.False(calls.ShouldPublish("Idle"));
+        Assert.Equal(1, sdk.Ends);
+        Assert.Single(sdk.Effects);
+        Assert.Equal(HubEvents.Presence, sdk.Effects[0].Type);
+    }
+
+    [Fact]
+    public async Task CancelledOperationMustNotTouchSdk()
+    {
+        var sdk = new RecordingSdk();
+        using var hub = Create(sdk);
+        using var cts = new CancellationTokenSource();
+        cts.Cancel();
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(
+            () => hub.EnsureRegisteredAsync(cts.Token));
+        Assert.Empty(sdk.Calls);
+    }
+
+    [Fact]
+    public async Task DisposingHubTerminatesSdk()
+    {
+        var sdk = new RecordingSdk();
+        var hub = Create(sdk);
+        hub.Dispose();
+        hub.Dispose();
+        Assert.True(sdk.Disposed);
+        await Assert.ThrowsAsync<ObjectDisposedException>(
+            () => hub.EnsureRegisteredAsync(CancellationToken.None));
     }
 }
