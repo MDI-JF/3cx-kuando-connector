@@ -9,12 +9,13 @@ internal sealed class KuandoHub
     private readonly HttpClient _http;
     private readonly AppSettings _settings;
     private readonly Uri? _url;
-    private readonly RegistrationLease _registration = new();
+    private readonly RegistrationLease _registration;
 
     public KuandoHub(HttpClient http, AppSettings settings, bool terminalSession)
     {
         _http = http;
         _settings = settings;
+        _registration = new RegistrationLease();
         int? port = null;
         using (var key = Registry.CurrentUser.OpenSubKey(@"Software\Busylight"))
         {
@@ -22,6 +23,15 @@ internal sealed class KuandoHub
             if (raw is not null && int.TryParse(raw.ToString(), out var parsed)) port = parsed;
         }
         _url = KuandoEndpointResolver.Resolve(settings.KuandoUrlOverride, port, terminalSession);
+    }
+    
+    // Injected transport for regression tests; no real kuandoHUB is required.
+    internal KuandoHub(HttpClient http, AppSettings settings, Uri endpoint, RegistrationLease registration)
+    {
+        _http = http;
+        _settings = settings;
+        _url = KuandoEndpointResolver.ValidateLoopback(endpoint.ToString());
+        _registration = registration;
     }
 
     public bool HasEndpoint => _url is not null;
