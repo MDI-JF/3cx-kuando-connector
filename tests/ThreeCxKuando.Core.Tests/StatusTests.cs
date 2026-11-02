@@ -93,4 +93,61 @@ public class StatusTests
         settings.PollSeconds = 0;
         Assert.Throws<ArgumentException>(() => settings.Validate());
     }
+
+    [Theory]
+    [InlineData("Dialing", "Light")]
+    [InlineData("Ringing", "Blink")]
+    [InlineData("Connected", "Light")]
+    [InlineData("Hold", "Pulse")]
+    [InlineData("Held", "Pulse")]
+    public void EveryCallAnimationSharesTheOffPriorityCategory(string state, string expectedAction)
+    {
+        var styles = DefaultStyles.Create();
+        using var payload = JsonDocument.Parse(
+            KuandoProtocol.Signal(KuandoProtocol.CallSource, state, styles[state]));
+        Assert.Equal(expectedAction, payload.RootElement.GetProperty("action").GetString());
+        Assert.Equal("Light", payload.RootElement.GetProperty("eventtype").GetString());
+        using var registration = JsonDocument.Parse(
+            KuandoProtocol.Register(KuandoProtocol.CallSource, styles));
+        var parameter = registration.RootElement.GetProperty("parameter").GetString()!;
+        using var dataSource = JsonDocument.Parse(parameter);
+        var names = dataSource.RootElement.GetProperty("eventnames")
+            .GetProperty("Light").GetProperty("EventNames")
+            .EnumerateArray().Select(e => e.GetString()).ToArray();
+        Assert.Contains(state, names);
+        Assert.Contains("Off", names);
+    }
+
+    [Fact]
+    public void CallFinishesWithExactlyOneOffRatherThanPermanentIdlePriority()
+    {
+        var state = new CallEventState();
+        Assert.False(state.ShouldPublish("Idle")); // no artificial Off on startup
+        Assert.True(state.ShouldPublish("Ringing"));
+        state.MarkPublished("Ringing");
+        Assert.False(state.ShouldPublish("Ringing"));
+        Assert.True(state.ShouldPublish("Connected"));
+        state.MarkPublished("Connected");
+        Assert.True(state.ShouldPublish("Idle"));  // ending an actual call
+        // An HTTP failure must not accidentally consume the Off transition:
+        Assert.True(state.ShouldPublish("Idle"));
+        state.MarkPublished("Idle");
+        Assert.False(state.ShouldPublish("Idle"));
+        state.ResetForReconnect();
+        Assert.False(state.ShouldPublish("Idle")); // no reactivation on refresh
+    }
+
+    [Fact]
+    public void ReconnectedHubReplaysActiveCallAndClearsItOnce()
+    {
+        var state = new CallEventState();
+        state.MarkPublished("Connected");
+        state.ResetForReconnect();
+        Assert.True(state.ShouldPublish("Connected"));
+        state.MarkPublished("Connected");
+        Assert.False(state.ShouldPublish("Connected"));
+        Assert.True(state.ShouldPublish("Idle"));
+        state.MarkPublished("Idle");
+        Assert.False(state.ShouldPublish("Idle"));
+    }
 }

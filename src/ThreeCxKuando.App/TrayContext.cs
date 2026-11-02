@@ -17,6 +17,7 @@ internal sealed class TrayContext : ApplicationContext
     private bool _editing;
     private string _lastPresence = "unbekannt";
     private string _lastCall = "unbekannt";
+    private string _lastCallSent = "noch nichts";
     private string _lastError = "";
 
     public TrayContext()
@@ -27,6 +28,7 @@ internal sealed class TrayContext : ApplicationContext
         menu.Items.Add(new ToolStripSeparator());
         menu.Items.Add("Einstellungen …", null, (_, _) => OpenSettings());
         menu.Items.Add("Neu verbinden", null, (_, _) => StartMonitor());
+        menu.Items.Add("Diagnoseprotokoll öffnen", null, (_, _) => DiagnosticLog.Open());
         menu.Items.Add("Beenden", null, (_, _) => ExitThread());
         _tray = new NotifyIcon
         {
@@ -54,7 +56,7 @@ internal sealed class TrayContext : ApplicationContext
     private void UpdateStatus()
     {
         _statusItem.Text = string.IsNullOrWhiteSpace(_lastError)
-            ? $"3CX: {_lastPresence} | Anruf: {_lastCall}"
+            ? $"3CX: {_lastPresence} | Anruf: {_lastCall} | kuando Call: {_lastCallSent}"
             : "Fehler: " + _lastError;
         _tray.Text = _statusItem.Text.Length > 60 ? _statusItem.Text[..60] : _statusItem.Text;
     }
@@ -100,7 +102,13 @@ internal sealed class TrayContext : ApplicationContext
         var terminalSession = SystemInformation.TerminalServerSession;
         var hub = new KuandoHub(hubHttp, settings, terminalSession);
         var dedup = new EventDeduplicator();
-        hub.RegistrationRecovered += dedup.Reset;
+        var callEvents = new CallEventState();
+        hub.RegistrationRecovered += () =>
+        {
+            dedup.Reset();
+            callEvents.ResetForReconnect();
+            DiagnosticLog.Write("kuandoHUB", "Sources registered/refreshed");
+        };
         using var callChanges = new SemaphoreSlim(0, 1);
         void Trigger() { if (Interlocked.Exchange(ref _changesRequested, 1) == 0) { try { callChanges.Release(); } catch (SemaphoreFullException) { } } }
         var wsTask = api.WatchCallEventsAsync(Trigger, ct);
@@ -134,7 +142,12 @@ internal sealed class TrayContext : ApplicationContext
                         lastCallFetch = DateTimeOffset.UtcNow;
                     }
                     callValue = lastCallValue;
-                    if (callValue is not null) _lastCall = callValue;
+                    if (callValue is not null)
+                    {
+                        if (_lastCall != callValue)
+                            DiagnosticLog.Write("3CX Call detected", callValue);
+                        _lastCall = callValue;
+                    }
                 }
                 catch (OperationCanceledException) when (ct.IsCancellationRequested) { break; }
                 catch (Exception ex) { problems.Add("Call Control: " + ex.Message); }
@@ -149,11 +162,12 @@ internal sealed class TrayContext : ApplicationContext
                             await hub.SendPresenceAsync(presenceValue, ct);
                             dedup.MarkSent(KuandoProtocol.PresenceSource, presenceValue);
                         }
-                        if (callValue is not null &&
-                            dedup.ShouldSend(KuandoProtocol.CallSource, callValue))
+                        if (callValue is not null && callEvents.ShouldPublish(callValue))
                         {
                             await hub.SendCallAsync(callValue, ct);
-                            dedup.MarkSent(KuandoProtocol.CallSource, callValue);
+                            callEvents.MarkPublished(callValue); // never mark a failed HTTP request
+                            _lastCallSent = callValue == "Idle" ? "Off" : callValue;
+                            DiagnosticLog.Write("kuandoHUB 3CX Call sent", _lastCallSent);
                         }
                     }
                     else problems.Add("kuandoHUB nicht erreichbar: " + hub.EndpointLabel);
