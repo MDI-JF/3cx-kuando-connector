@@ -150,4 +150,39 @@ public class StatusTests
         state.MarkPublished("Idle");
         Assert.False(state.ShouldPublish("Idle"));
     }
+
+    private sealed class TestClock : TimeProvider
+    {
+        public DateTimeOffset Now { get; set; } = DateTimeOffset.Parse("2026-11-02T20:00:00+01:00");
+        public override DateTimeOffset GetUtcNow() => Now;
+    }
+
+    [Fact]
+    public void SuccessfulRegistrationIsNotRepeatedEveryMinute()
+    {
+        var clock = new TestClock();
+        var registration = new RegistrationLease(clock);
+        Assert.True(registration.IsDue);
+        registration.Registered();
+        Assert.False(registration.IsDue);
+        clock.Now += TimeSpan.FromMinutes(1);
+        Assert.False(registration.IsDue);
+        clock.Now += TimeSpan.FromMinutes(13);
+        Assert.False(registration.IsDue);
+        clock.Now += TimeSpan.FromMinutes(1);
+        Assert.True(registration.IsDue);
+    }
+
+    [Fact]
+    public void FailedTransportInvalidatesRegistrationImmediately()
+    {
+        var clock = new TestClock();
+        var registration = new RegistrationLease(clock);
+        registration.Registered();
+        Assert.False(registration.IsDue);
+        registration.Invalidate();
+        Assert.True(registration.IsDue);
+        registration.Registered();
+        Assert.False(registration.IsDue);
+    }
 }
