@@ -69,10 +69,6 @@ Sensitive credentials, raw API payloads, token values, and caller details are no
 
 The executable is `3cxKuando.exe`.
 
-## Upgrading from development builds
+## Development builds
 
-Existing settings and the DPAPI-protected secret are copied on first launch from the
-previous per-user configuration location if the new destination files do not exist.
-Existing diagnostic logs are preserved. The earlier Windows autostart entry is removed
-when the application starts or settings are saved. Before upgrading, exit the running
-tray application.
+Only current `3cxKuando` configuration and log paths are supported; migration from older development builds is not included.

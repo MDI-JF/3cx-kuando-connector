@@ -33,9 +33,5 @@ Name: "{group}\Uninstall 3cxKuando"; Filename: "{uninstallexe}"
 [Run]
 Filename: "{app}\3cxKuando.exe"; Description: "Launch 3cxKuando"; Flags: nowait postinstall skipifsilent
 
-[InstallDelete]
-; Clean up the executable name from pre-release builds.
-Type: files; Name: "{app}\ThreeCxKuando.exe"
-
 [UninstallDelete]
 ; Never delete per-user settings or DPAPI-protected secrets on uninstall.
