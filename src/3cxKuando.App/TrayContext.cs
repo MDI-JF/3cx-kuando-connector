@@ -189,12 +189,12 @@ internal sealed class TrayContext : ApplicationContext
                     {
                         // Failed presence requests must not block call signaling.
                         if (presenceValue is not null &&
-                            dedup.ShouldSend(KuandoProtocol.PresenceSource, presenceValue))
+                            dedup.ShouldSend(KuandoProtocol.Source, KuandoProtocol.PresenceEventType, presenceValue))
                         {
                             try
                             {
                                 await hub.SendPresenceAsync(presenceValue, ct);
-                                dedup.MarkSent(KuandoProtocol.PresenceSource, presenceValue);
+                                dedup.MarkSent(KuandoProtocol.Source, KuandoProtocol.PresenceEventType, presenceValue);
                             }
                             catch (OperationCanceledException) when (ct.IsCancellationRequested) { break; }
                             catch (Exception ex)
