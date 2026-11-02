@@ -3,10 +3,7 @@ using KuandoConnector.Core;
 
 namespace KuandoConnector.App;
 
-/// <summary>
-/// Narrow seam around the official Plenom SDK so tests need neither a physical
-/// Busylight nor a running kuandoHUB.
-/// </summary>
+/// <summary>A mockable boundary for the kuandoHUB SDK, without USB access.</summary>
 internal interface IHubSdk : IDisposable
 {
     bool IsHubConnected { get; }
@@ -17,24 +14,76 @@ internal interface IHubSdk : IDisposable
 }
 
 /// <summary>
-/// Operates in kuandoHUB mode (not direct USB mode). Each effect is tagged with
-/// its semantic event type and event name before invoking the SDK.
+/// Minimal surface of the native SDK for exercising actual effect-to-API
+/// mappings in tests without connecting to a physical device.
+/// </summary>
+internal interface IPlenomRuntime
+{
+    bool IsHubConnected { get; }
+    string ActualEventType { set; }
+    string ActualEventName { set; }
+    string LightEventType { set; }
+    string BlinkEventType { set; }
+    string PulseEventType { set; }
+    void RegisterDataSource(BusylightHubDataSourceParameter definition);
+    void CreateInitialPriority(BusylightHubPriorityParameter priority);
+    void Light(BusylightColor color, string eventName);
+    void Blink(BusylightColor color, int onTime, int offTime, string eventName);
+    void Pulse(PulseSequence sequence, string eventName);
+    void EndEvent(string eventType, string eventName);
+    void Terminate();
+}
+
+/// <summary>Official Plenom SDK in kuandoHUB mode; never uses direct USB APIs.</summary>
+internal sealed class PlenomRuntime : IPlenomRuntime
+{
+    private readonly KuandoSDK _sdk = new(HubEvents.Source);
+
+    public bool IsHubConnected => _sdk.IsHubConnected;
+    public string ActualEventType { set => _sdk.ActualEventType = value; }
+    public string ActualEventName { set => _sdk.ActualEventName = value; }
+    public string LightEventType { set => _sdk.LightEventType = value; }
+    public string BlinkEventType { set => _sdk.BlinkEventType = value; }
+    public string PulseEventType { set => _sdk.PulseEventType = value; }
+    public void RegisterDataSource(BusylightHubDataSourceParameter definition) => _sdk.RegisterDataSource(definition);
+    public void CreateInitialPriority(BusylightHubPriorityParameter priority) => _sdk.CreateInitialPriority(priority);
+    public void Light(BusylightColor color, string eventName) => _sdk.Light(color, eventName);
+    public void Blink(BusylightColor color, int onTime, int offTime, string eventName) =>
+        _sdk.Blink(color, onTime, offTime, eventName);
+    public void Pulse(PulseSequence sequence, string eventName) => _sdk.Pulse(sequence, eventName);
+    public void EndEvent(string eventType, string eventName) => _sdk.EndEvent(eventType, eventName);
+    public void Terminate() => _sdk.Terminate();
+}
+
+/// <summary>
+/// Tags all SDK effects with the correct semantic event type and name before
+/// sending them to kuandoHUB. Presence and Alert remain independent channels.
 /// </summary>
 internal sealed class PlenomHubSdk : IHubSdk
 {
-    private readonly KuandoSDK _sdk = new(HubEvents.Source);
+    private readonly IPlenomRuntime _sdk;
     private bool _disposed;
-    public bool IsHubConnected => _sdk.IsHubConnected;
 
-    public void RegisterDataSource(BusylightHubDataSourceParameter definition) =>
+    public PlenomHubSdk() : this(new PlenomRuntime()) { }
+    internal PlenomHubSdk(IPlenomRuntime sdk) => _sdk = sdk;
+
+    public bool IsHubConnected => !_disposed && _sdk.IsHubConnected;
+
+    public void RegisterDataSource(BusylightHubDataSourceParameter definition)
+    {
+        ThrowIfDisposed();
         _sdk.RegisterDataSource(definition);
+    }
 
-    public void CreateInitialPriority(BusylightHubPriorityParameter priority) =>
+    public void CreateInitialPriority(BusylightHubPriorityParameter priority)
+    {
+        ThrowIfDisposed();
         _sdk.CreateInitialPriority(priority);
+    }
 
     public void Send(string eventType, string eventName, LightStyle style)
     {
-        if (_disposed) throw new ObjectDisposedException(nameof(PlenomHubSdk));
+        ThrowIfDisposed();
         style.Validate();
         if (eventType is not (HubEvents.Presence or HubEvents.Alert))
             throw new ArgumentException("Unknown kuandoHUB event type.", nameof(eventType));
@@ -45,8 +94,6 @@ internal sealed class PlenomHubSdk : IHubSdk
             BlueRgbValue = style.Blue
         };
 
-        // The SDK selects the event type by effect, not by data-source name.
-        // Never allow a call's Light effect to inherit Presence and vice versa.
         _sdk.ActualEventType = eventType;
         _sdk.ActualEventName = eventName;
         switch (style.Action)
@@ -74,11 +121,15 @@ internal sealed class PlenomHubSdk : IHubSdk
 
     public void EndAlert()
     {
-        if (_disposed) throw new ObjectDisposedException(nameof(PlenomHubSdk));
+        ThrowIfDisposed();
         _sdk.ActualEventType = HubEvents.Alert;
         _sdk.ActualEventName = "Off";
-        // End only the Alert priority; Off() may release unrelated events.
         _sdk.EndEvent(HubEvents.Alert, "Off");
+    }
+
+    private void ThrowIfDisposed()
+    {
+        if (_disposed) throw new ObjectDisposedException(nameof(PlenomHubSdk));
     }
 
     public void Dispose()
