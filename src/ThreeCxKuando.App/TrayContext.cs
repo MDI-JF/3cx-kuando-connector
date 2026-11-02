@@ -105,50 +105,64 @@ internal sealed class TrayContext : ApplicationContext
         void Trigger() { if (Interlocked.Exchange(ref _changesRequested, 1) == 0) { try { callChanges.Release(); } catch (SemaphoreFullException) { } } }
         var wsTask = api.WatchCallEventsAsync(Trigger, ct);
         var lastCallFetch = DateTimeOffset.MinValue;
-        var lastCallValue = "Idle";
-        var lastPresenceValue = "";
+        string? lastCallValue = null;
         try
         {
             while (!ct.IsCancellationRequested)
             {
+                string? presenceValue = null;
+                string? callValue = null;
+                var problems = new List<string>();
+
                 try
                 {
                     var presence = await api.GetPresenceAsync(ct);
-                    lastPresenceValue = StatusLogic.NormalizePresence(presence.Profile);
-                    if (lastPresenceValue == "") throw new InvalidOperationException("Unbekanntes 3CX-Präsenzprofil: " + presence.Profile);
+                    presenceValue = StatusLogic.NormalizePresence(presence.Profile);
+                    if (presenceValue.Length == 0)
+                        throw new InvalidOperationException("Unbekanntes 3CX-Präsenzprofil: " + presence.Profile);
+                    _lastPresence = presenceValue;
+                }
+                catch (OperationCanceledException) when (ct.IsCancellationRequested) { break; }
+                catch (Exception ex) { problems.Add("Presence: " + ex.Message); }
+
+                try
+                {
                     if (Interlocked.Exchange(ref _changesRequested, 0) == 1 ||
                         DateTimeOffset.UtcNow - lastCallFetch > TimeSpan.FromSeconds(5))
                     {
                         lastCallValue = await api.GetCallStateAsync(ct);
                         lastCallFetch = DateTimeOffset.UtcNow;
                     }
-                    if (await hub.EnsureRegisteredAsync(ct))
-                    {
-                        if (dedup.ShouldSend(KuandoProtocol.PresenceSource, lastPresenceValue))
-                        {
-                            await hub.SendPresenceAsync(lastPresenceValue, ct);
-                            dedup.MarkSent(KuandoProtocol.PresenceSource, lastPresenceValue);
-                        }
-                        if (dedup.ShouldSend(KuandoProtocol.CallSource, lastCallValue))
-                        {
-                            await hub.SendCallAsync(lastCallValue, ct);
-                            dedup.MarkSent(KuandoProtocol.CallSource, lastCallValue);
-                        }
-                    }
-                    _lastPresence = lastPresenceValue;
-                    _lastCall = lastCallValue;
-                    _lastError = "";
-
-                    // Tray UI is refreshed by a WinForms timer on its own UI thread.
+                    callValue = lastCallValue;
+                    if (callValue is not null) _lastCall = callValue;
                 }
                 catch (OperationCanceledException) when (ct.IsCancellationRequested) { break; }
-                catch (Exception e)
-                {
-                    _lastError = e.Message;
+                catch (Exception ex) { problems.Add("Call Control: " + ex.Message); }
 
-                    // Tray UI is refreshed by a WinForms timer on its own UI thread.
-                    // Do not change kuando lights when 3CX is unreachable.
+                try
+                {
+                    if (await hub.EnsureRegisteredAsync(ct))
+                    {
+                        if (presenceValue is not null &&
+                            dedup.ShouldSend(KuandoProtocol.PresenceSource, presenceValue))
+                        {
+                            await hub.SendPresenceAsync(presenceValue, ct);
+                            dedup.MarkSent(KuandoProtocol.PresenceSource, presenceValue);
+                        }
+                        if (callValue is not null &&
+                            dedup.ShouldSend(KuandoProtocol.CallSource, callValue))
+                        {
+                            await hub.SendCallAsync(callValue, ct);
+                            dedup.MarkSent(KuandoProtocol.CallSource, callValue);
+                        }
+                    }
+                    else problems.Add("kuandoHUB nicht erreichbar: " + hub.EndpointLabel);
                 }
+                catch (OperationCanceledException) when (ct.IsCancellationRequested) { break; }
+                catch (Exception ex) { problems.Add("kuandoHUB: " + ex.Message); }
+
+                _lastError = string.Join(" | ", problems);
+                // Never send an artificial Off/unknown color when 3CX cannot be read.
                 await Task.Delay(TimeSpan.FromSeconds(settings.PollSeconds), ct);
             }
         }
