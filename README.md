@@ -9,6 +9,7 @@ Windows tray connector for **3CX v20 Presence** and **Call Control**, using the 
 ## Features
 
 - One kuandoHUB source, `3CX Connector`, with separately configurable `Presence` and `Alert` event-type priorities
+- Independent state/deduplication channels keyed by `(sender, event type)`; `Alert` changes never suppress a `Presence` update despite the shared sender
 - Presence profiles via 3CX XAPI; call state via Call Control REST + WebSocket updates
 - Automatic reconnect and OAuth token renewal
 - Per-Windows-user configuration in `%APPDATA%\3cxKuando`
