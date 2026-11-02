@@ -6,7 +6,6 @@ public sealed class AppSettings
     public string ClientId { get; set; } = "";
     public string Extension { get; set; } = "";
     public int PollSeconds { get; set; } = 3;
-    public string? KuandoUrlOverride { get; set; }
     public bool StartAtLogin { get; set; } = true;
     public Dictionary<string, LightStyle> EventStyles { get; set; } = DefaultStyles.Create();
 
@@ -21,8 +20,6 @@ public sealed class AppSettings
         if (EventStyles is null || DefaultStyles.Create().Keys.Except(EventStyles.Keys).Any())
             throw new ArgumentException("One or more event styles are missing.");
         foreach (var style in EventStyles.Values) style.Validate();
-        if (!string.IsNullOrWhiteSpace(KuandoUrlOverride))
-            _ = KuandoEndpointResolver.ValidateLoopback(KuandoUrlOverride);
     }
 }
 
