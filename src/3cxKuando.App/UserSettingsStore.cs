@@ -2,14 +2,31 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using Microsoft.Win32;
-using ThreeCxKuando.Core;
+using KuandoConnector.Core;
 
-namespace ThreeCxKuando.App;
+namespace KuandoConnector.App;
 
 internal sealed class UserSettingsStore
 {
-    private readonly string _dir = Path.Combine(
-        Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "3CXKuandoConnector");
+    private static readonly string Root = Environment.GetFolderPath(
+        Environment.SpecialFolder.ApplicationData);
+    private readonly string _dir = Path.Combine(Root, "3cxKuando");
+
+    public UserSettingsStore()
+    {
+        // Retain existing per-user settings and DPAPI-protected credentials from
+        // development builds. DPAPI CurrentUser remains valid under the same account.
+        string legacy = Path.Combine(Root, "3CXKuandoConnector");
+        if (!Directory.Exists(legacy)) return;
+        foreach (string name in new[] { "settings.json", "secret.dat" })
+        {
+            string source = Path.Combine(legacy, name);
+            string destination = Path.Combine(_dir, name);
+            if (!File.Exists(source) || File.Exists(destination)) continue;
+            Directory.CreateDirectory(_dir);
+            File.Copy(source, destination, overwrite: false);
+        }
+    }
     private string SettingsPath => Path.Combine(_dir, "settings.json");
     private string SecretPath => Path.Combine(_dir, "secret.dat");
 
@@ -44,7 +61,7 @@ internal sealed class UserSettingsStore
             try { File.WriteAllBytes(SecretPath, ProtectedData.Protect(plain, null, DataProtectionScope.CurrentUser)); }
             finally { CryptographicOperations.ZeroMemory(plain); }
         }
-        if (!HasSecret) throw new InvalidOperationException("Ein 3CX API-Secret muss hinterlegt werden.");
+        if (!HasSecret) throw new InvalidOperationException("A 3CX API secret is required.");
         ConfigureAutostart(settings.StartAtLogin);
     }
 
@@ -53,10 +70,12 @@ internal sealed class UserSettingsStore
     private static void ConfigureAutostart(bool enabled)
     {
         using var key = Registry.CurrentUser.CreateSubKey(@"Software\Microsoft\Windows\CurrentVersion\Run");
-        const string name = "ThreeCxKuandoConnector";
+        const string name = "3cxKuando";
+        // Remove the earlier autostart value to prevent duplicate launches.
+        key?.DeleteValue("ThreeCxKuandoConnector", false);
         if (!enabled) { key?.DeleteValue(name, false); return; }
         var executable = Environment.ProcessPath ??
-            throw new InvalidOperationException("Pfad der Anwendung konnte nicht bestimmt werden.");
+            throw new InvalidOperationException("Could not determine the application path.");
         key?.SetValue(name, "\"" + executable + "\"", RegistryValueKind.String);
     }
 }

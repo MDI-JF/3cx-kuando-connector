@@ -2,13 +2,13 @@ using System.Net.Http.Headers;
 using System.Net.WebSockets;
 using System.Text;
 using System.Text.Json;
-using ThreeCxKuando.Core;
+using KuandoConnector.Core;
 
-namespace ThreeCxKuando.App;
+namespace KuandoConnector.App;
 
 internal sealed record PresenceResult(string Profile, bool? Registered, string Name);
 
-internal sealed class ThreeCxApi : IDisposable
+internal sealed class PbxApiClient : IDisposable
 {
     private readonly HttpClient _http;
     private readonly AppSettings _settings;
@@ -20,7 +20,7 @@ internal sealed class ThreeCxApi : IDisposable
 
     public bool IsWebSocketConnected => _websocketConnected;
 
-    public ThreeCxApi(HttpClient http, AppSettings settings, string secret)
+    public PbxApiClient(HttpClient http, AppSettings settings, string secret)
     {
         _http = http;
         _settings = settings;
@@ -77,7 +77,7 @@ internal sealed class ThreeCxApi : IDisposable
             $"/xapi/v1/Users?$filter={filter}&$select=Number,DisplayName,CurrentProfileName,IsRegistered&$top=1", ct);
         var users = json.RootElement.GetProperty("value");
         if (users.GetArrayLength() != 1)
-            throw new InvalidOperationException("3CX XAPI: Nebenstelle nicht gefunden oder nicht lesbar.");
+            throw new InvalidOperationException("3CX XAPI: extension was not found or could not be read.");
         var user = users[0];
         string profile = user.TryGetProperty("CurrentProfileName", out var p) ? p.GetString() ?? "" : "";
         string name = user.TryGetProperty("DisplayName", out var n) ? n.GetString() ?? _settings.Extension : _settings.Extension;

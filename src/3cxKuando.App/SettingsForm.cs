@@ -1,6 +1,6 @@
-using ThreeCxKuando.Core;
+using KuandoConnector.Core;
 
-namespace ThreeCxKuando.App;
+namespace KuandoConnector.App;
 
 internal sealed class SettingsForm : Form
 {
@@ -10,15 +10,15 @@ internal sealed class SettingsForm : Form
     private readonly TextBox _extension = new() { Width = 300 };
     private readonly TextBox _kuando = new() { Width = 300 };
     private readonly NumericUpDown _poll = new() { Width = 100, Minimum = 2, Maximum = 60 };
-    private readonly CheckBox _autostart = new() { Text = "Bei Windows-Anmeldung starten", AutoSize = true };
-    private readonly Label _hint = new() { AutoSize = true, MaximumSize = new Size(490, 0), Text = "Das Secret wird nur dann ersetzt, wenn ein neuer Wert eingegeben wird. Es ist lokal per DPAPI (CurrentUser) geschützt." };
+    private readonly CheckBox _autostart = new() { Text = "Start with Windows sign-in", AutoSize = true };
+    private readonly Label _hint = new() { AutoSize = true, MaximumSize = new Size(490, 0), Text = "Enter a new secret to replace the stored one. It is encrypted for the current Windows user using DPAPI." };
     private readonly AppSettings _settings;
     public string? NewSecret => string.IsNullOrWhiteSpace(_secret.Text) ? null : _secret.Text;
 
     public SettingsForm(AppSettings settings)
     {
         _settings = settings;
-        Text = "3CX kuando Connector – Einstellungen";
+        Text = "3cxKuando - Settings";
         StartPosition = FormStartPosition.CenterScreen;
         MinimumSize = new Size(550, 430);
         ClientSize = new Size(550, 450);
@@ -41,19 +41,19 @@ internal sealed class SettingsForm : Form
         };
         layout.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 175));
         layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
-        AddRow(layout, "3CX-Server (HTTPS)", _pbx);
+        AddRow(layout, "3CX server (HTTPS)", _pbx);
         AddRow(layout, "API Client ID", _client);
         AddRow(layout, "API Client Secret", _secret);
-        AddRow(layout, "Nebenstelle", _extension);
-        AddRow(layout, "Präsenz-Polling (Sek.)", _poll);
-        AddRow(layout, "kuandoHUB-URL (optional)", _kuando);
+        AddRow(layout, "Extension", _extension);
+        AddRow(layout, "Presence polling (seconds)", _poll);
+        AddRow(layout, "kuandoHUB URL (optional)", _kuando);
         AddRow(layout, "", _autostart);
         AddRow(layout, "", _hint);
 
         var actions = new FlowLayoutPanel { Dock = DockStyle.Fill, FlowDirection = FlowDirection.RightToLeft, AutoSize = true };
-        var save = new Button { Text = "Speichern", DialogResult = DialogResult.None, AutoSize = true };
+        var save = new Button { Text = "Save", DialogResult = DialogResult.None, AutoSize = true };
         save.Click += Save;
-        var cancel = new Button { Text = "Abbrechen", DialogResult = DialogResult.Cancel, AutoSize = true };
+        var cancel = new Button { Text = "Cancel", DialogResult = DialogResult.Cancel, AutoSize = true };
         actions.Controls.Add(save);
         actions.Controls.Add(cancel);
         AddRow(layout, "", actions);
@@ -87,7 +87,7 @@ internal sealed class SettingsForm : Form
         }
         catch (Exception ex)
         {
-            MessageBox.Show(ex.Message, "Ungültige Konfiguration", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            MessageBox.Show(ex.Message, "Invalid configuration", MessageBoxButtons.OK, MessageBoxIcon.Warning);
         }
     }
 }

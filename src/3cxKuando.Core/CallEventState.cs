@@ -1,4 +1,4 @@
-namespace ThreeCxKuando.Core;
+namespace KuandoConnector.Core;
 
 /// <summary>
 /// Tracks the reported call event separately from the observed 3CX call state.

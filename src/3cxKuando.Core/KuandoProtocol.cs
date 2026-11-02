@@ -1,6 +1,6 @@
 using System.Text.Json;
 
-namespace ThreeCxKuando.Core;
+namespace KuandoConnector.Core;
 
 public static class KuandoProtocol
 {

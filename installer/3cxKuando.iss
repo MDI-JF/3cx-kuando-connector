@@ -7,16 +7,16 @@
 #endif
 [Setup]
 AppId={{A2D0CC51-FB01-4CC7-8FC4-135A443D552A}
-AppName=3CX kuando Connector
+AppName=3cxKuando
 AppVersion={#AppVersion}
-AppPublisher=3CX kuando Connector Contributors
-DefaultDirName={autopf}\3CX kuando Connector
-DefaultGroupName=3CX kuando Connector
+AppPublisher=3cxKuando Contributors
+DefaultDirName={autopf}\3cxKuando
+DefaultGroupName=3cxKuando
 DisableProgramGroupPage=yes
 Compression=lzma2
 SolidCompression=yes
 OutputDir=..\artifacts
-OutputBaseFilename=3CXKuandoConnector-v{#AppVersion}-win-x64-setup
+OutputBaseFilename=3cxKuando-v{#AppVersion}-win-x64-setup
 ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
 PrivilegesRequired=admin
@@ -27,11 +27,11 @@ WizardStyle=modern
 Source: "{#PublishDir}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 
 [Icons]
-Name: "{group}\3CX kuando Connector"; Filename: "{app}\3cxKuando.exe"
-Name: "{group}\Uninstall 3CX kuando Connector"; Filename: "{uninstallexe}"
+Name: "{group}\3cxKuando"; Filename: "{app}\3cxKuando.exe"
+Name: "{group}\Uninstall 3cxKuando"; Filename: "{uninstallexe}"
 
 [Run]
-Filename: "{app}\3cxKuando.exe"; Description: "3CX kuando Connector starten"; Flags: nowait postinstall skipifsilent
+Filename: "{app}\3cxKuando.exe"; Description: "Launch 3cxKuando"; Flags: nowait postinstall skipifsilent
 
 [InstallDelete]
 ; Clean up the executable name from pre-release builds.

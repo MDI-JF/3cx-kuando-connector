@@ -6,10 +6,10 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <AssemblyName>3cxKuando</AssemblyName>
-    <ApplicationTitle>3CX kuando Connector</ApplicationTitle>
+    <ApplicationTitle>3cxKuando</ApplicationTitle>
   </PropertyGroup>
   <ItemGroup>
-    <ProjectReference Include="../ThreeCxKuando.Core/ThreeCxKuando.Core.csproj" />
+    <ProjectReference Include="../3cxKuando.Core/3cxKuando.Core.csproj" />
     <PackageReference Include="System.Security.Cryptography.ProtectedData" Version="10.0.0" />
   </ItemGroup>
 </Project>

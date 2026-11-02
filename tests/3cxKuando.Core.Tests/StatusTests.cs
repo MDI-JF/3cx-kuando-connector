@@ -1,8 +1,8 @@
 using Xunit;
 using System.Text.Json;
-using ThreeCxKuando.Core;
+using KuandoConnector.Core;
 
-namespace ThreeCxKuando.Core.Tests;
+namespace KuandoConnector.Core.Tests;
 
 public class StatusTests
 {

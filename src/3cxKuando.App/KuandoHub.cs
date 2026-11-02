@@ -1,8 +1,8 @@
 using System.Text;
 using Microsoft.Win32;
-using ThreeCxKuando.Core;
+using KuandoConnector.Core;
 
-namespace ThreeCxKuando.App;
+namespace KuandoConnector.App;
 
 internal sealed class KuandoHub
 {
@@ -26,7 +26,7 @@ internal sealed class KuandoHub
     }
 
     public bool HasEndpoint => _url is not null;
-    public string EndpointLabel => _url?.ToString() ?? "Kein eindeutiger kuandoHUB-Port in dieser Sitzung";
+    public string EndpointLabel => _url?.ToString() ?? "No unambiguous kuandoHUB port in this session";
 
     public async Task<bool> EnsureRegisteredAsync(CancellationToken ct)
     {
@@ -79,7 +79,7 @@ internal sealed class KuandoHub
 
     private async Task PostAsync(string json, string operation, CancellationToken ct)
     {
-        if (_url is null) throw new InvalidOperationException("kuandoHUB-Port nicht ermittelbar.");
+        if (_url is null) throw new InvalidOperationException("Unable to determine the kuandoHUB port.");
         try
         {
             using var content = new StringContent(json, Encoding.UTF8, "application/json");

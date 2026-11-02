@@ -3,14 +3,15 @@ using System.Net.Http;
 using System.Net.Sockets;
 using System.Text;
 
-namespace ThreeCxKuando.App;
+namespace KuandoConnector.App;
 
 internal static class DiagnosticLog
 {
     private static readonly object Guard = new();
-    private static readonly string Folder = Path.Combine(
-        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-        "3CXKuandoConnector");
+    private static readonly string Root = Environment.GetFolderPath(
+        Environment.SpecialFolder.LocalApplicationData);
+    private static readonly string Folder = Path.Combine(Root, "3cxKuando");
+    private static readonly string LegacyFolder = Path.Combine(Root, "3CXKuandoConnector");
     private static readonly string FilePath = Path.Combine(Folder,
         $"events-session-{Process.GetCurrentProcess().SessionId}.log");
 
@@ -21,6 +22,10 @@ internal static class DiagnosticLog
             lock (Guard)
             {
                 Directory.CreateDirectory(Folder);
+                // Preserve prior diagnostics when a user upgrades in-place.
+                string legacyLog = Path.Combine(LegacyFolder, Path.GetFileName(FilePath));
+                if (!File.Exists(FilePath) && File.Exists(legacyLog))
+                    File.Copy(legacyLog, FilePath);
                 if (File.Exists(FilePath) && new FileInfo(FilePath).Length > 512 * 1024)
                     File.Move(FilePath, FilePath + ".old", true);
                 File.AppendAllText(FilePath,
@@ -55,7 +60,7 @@ internal static class DiagnosticLog
         }
         catch (Exception e)
         {
-            MessageBox.Show(e.Message, "Diagnoseprotokoll", MessageBoxButtons.OK,
+            MessageBox.Show(e.Message, "Diagnostic log", MessageBoxButtons.OK,
                 MessageBoxIcon.Warning);
         }
     }

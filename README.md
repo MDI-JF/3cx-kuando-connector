@@ -1,4 +1,4 @@
-# 3CX kuando Connector
+# 3cxKuando
 
 Windows tray connector for **3CX v20 Presence** and **Call Control**, using the **kuandoHUB HTTP POST** integration.
 
@@ -11,7 +11,7 @@ Windows tray connector for **3CX v20 Presence** and **Call Control**, using the 
 - Two independent kuandoHUB sources: `3CX Presence` and `3CX Call`
 - Presence profiles via 3CX XAPI; call state via Call Control REST + WebSocket updates
 - Automatic reconnect and OAuth token renewal
-- Per-Windows-user configuration in `%APPDATA%\3CXKuandoConnector`
+- Per-Windows-user configuration in `%APPDATA%\3cxKuando`
 - Client secret encrypted using Windows DPAPI `CurrentUser` (not protection against processes running as the same user)
 - kuandoHUB auto-discovery via `HKCU\Software\Busylight\http_port` or `localhost:8989` on non-RDS systems
 - Windows tray settings, per-user logon start, independent call/presence state
@@ -27,10 +27,10 @@ Windows tray connector for **3CX v20 Presence** and **Call Control**, using the 
 ## Build
 
 ```powershell
-dotnet restore ThreeCxKuando.slnx
-dotnet build ThreeCxKuando.slnx -c Release
-dotnet test ThreeCxKuando.slnx -c Release
-dotnet publish src/ThreeCxKuando.App/ThreeCxKuando.App.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -o artifacts/publish
+dotnet restore 3cxKuando.slnx
+dotnet build 3cxKuando.slnx -c Release
+dotnet test 3cxKuando.slnx -c Release
+dotnet publish src/3cxKuando.App/3cxKuando.App.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -o artifacts/publish
 ```
 
 Windows CI compiles an installer using Inno Setup 6. Official manual releases can be dispatched via GitHub Actions / Publish Release, with `0.1.0-beta.1` for prereleases or `0.1.0` for stable releases.
@@ -59,12 +59,20 @@ The automated tests cover foundational state, validation and protocol behaviors.
 
 ## Diagnostics
 
-From the tray menu select **Diagnoseprotokoll öffnen**. Per-user/per-session logs are
-stored at `%LOCALAPPDATA%\3CXKuandoConnector\events-session-<session-ID>.log`.
+From the tray menu select **Open diagnostic log**. Per-user/per-session logs are
+stored at `%LOCALAPPDATA%\3cxKuando\events-session-<session-ID>.log`.
 The previous log is rotated as `.log.old` after about 512 KB.
 
 The log includes 3CX state changes, local kuandoHUB POST operations and their HTTP
 status (or exception class/socket code), registration failures and connection-health changes.
 Sensitive credentials, raw API payloads, token values, and caller details are not logged.
 
-The executable is `3cxKuando.exe` (formerly `ThreeCxKuando.exe`).
+The executable is `3cxKuando.exe`.
+
+## Upgrading from development builds
+
+Existing settings and the DPAPI-protected secret are copied on first launch from the
+previous per-user configuration location if the new destination files do not exist.
+Existing diagnostic logs are preserved. The earlier Windows autostart entry is removed
+when the application starts or settings are saved. Before upgrading, exit the running
+tray application.

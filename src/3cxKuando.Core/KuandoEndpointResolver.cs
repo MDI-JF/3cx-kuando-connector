@@ -1,4 +1,4 @@
-namespace ThreeCxKuando.Core;
+namespace KuandoConnector.Core;
 
 public static class KuandoEndpointResolver
 {
@@ -11,7 +11,7 @@ public static class KuandoEndpointResolver
             !string.IsNullOrEmpty(uri.UserInfo) ||
             (uri.AbsolutePath != "/" && uri.AbsolutePath != "") ||
             !string.IsNullOrEmpty(uri.Query) || !string.IsNullOrEmpty(uri.Fragment))
-            throw new ArgumentException("kuandoHUB-Adresse muss http://localhost:<Port>/ sein.");
+            throw new ArgumentException("kuandoHUB endpoint must be http://localhost:<port>/.");
         return uri;
     }
 

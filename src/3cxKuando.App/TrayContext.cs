@@ -1,7 +1,7 @@
 using System.Drawing;
-using ThreeCxKuando.Core;
+using KuandoConnector.Core;
 
-namespace ThreeCxKuando.App;
+namespace KuandoConnector.App;
 
 internal sealed class TrayContext : ApplicationContext
 {
@@ -15,25 +15,25 @@ internal sealed class TrayContext : ApplicationContext
     private AppSettings _settings = new();
     private int _changesRequested;
     private bool _editing;
-    private string _lastPresence = "unbekannt";
-    private string _lastCall = "unbekannt";
-    private string _lastCallSent = "noch nichts";
+    private string _lastPresence = "unknown";
+    private string _lastCall = "unknown";
+    private string _lastCallSent = "none";
     private string _lastError = "";
     private string _lastDiagnosticHealth = "";
 
     public TrayContext()
     {
         var menu = new ContextMenuStrip();
-        _statusItem = new ToolStripMenuItem("Verbindung wird aufgebaut …") { Enabled = false };
+        _statusItem = new ToolStripMenuItem("Connecting...") { Enabled = false };
         menu.Items.Add(_statusItem);
         menu.Items.Add(new ToolStripSeparator());
-        menu.Items.Add("Einstellungen …", null, (_, _) => OpenSettings());
-        menu.Items.Add("Neu verbinden", null, (_, _) => StartMonitor());
-        menu.Items.Add("Diagnoseprotokoll öffnen", null, (_, _) => DiagnosticLog.Open());
-        menu.Items.Add("Beenden", null, (_, _) => ExitThread());
+        menu.Items.Add("Settings...", null, (_, _) => OpenSettings());
+        menu.Items.Add("Reconnect", null, (_, _) => StartMonitor());
+        menu.Items.Add("Open diagnostic log", null, (_, _) => DiagnosticLog.Open());
+        menu.Items.Add("Exit", null, (_, _) => ExitThread());
         _tray = new NotifyIcon
         {
-            Text = "3CX kuando Connector",
+            Text = "3cxKuando",
             Icon = SystemIcons.Application,
             Visible = true,
             ContextMenuStrip = menu
@@ -50,7 +50,7 @@ internal sealed class TrayContext : ApplicationContext
         }
         catch (Exception e)
         {
-            ShowError("Einstellungen konnten nicht gelesen werden: " + e.Message);
+            ShowError("Could not read settings: " + e.Message);
             DiagnosticLog.Write("Configuration error", DiagnosticLog.SafeError(e));
         }
         if (string.IsNullOrWhiteSpace(_settings.PbxUrl) || !_store.HasSecret)
@@ -67,8 +67,8 @@ internal sealed class TrayContext : ApplicationContext
     private void UpdateStatus()
     {
         _statusItem.Text = string.IsNullOrWhiteSpace(_lastError)
-            ? $"3CX: {_lastPresence} | Anruf: {_lastCall} | kuando Call: {_lastCallSent}"
-            : "Fehler: " + _lastError;
+            ? $"3CX: {_lastPresence} | Call: {_lastCall} | kuando Call: {_lastCallSent}"
+            : "Error: " + _lastError;
         _tray.Text = _statusItem.Text.Length > 60 ? _statusItem.Text[..60] : _statusItem.Text;
     }
 
@@ -88,7 +88,7 @@ internal sealed class TrayContext : ApplicationContext
                 _lastError = "";
                 StartMonitor();
             }
-            catch (Exception e) { MessageBox.Show(e.Message, "Speichern fehlgeschlagen", MessageBoxButtons.OK, MessageBoxIcon.Error); }
+            catch (Exception e) { MessageBox.Show(e.Message, "Save failed", MessageBoxButtons.OK, MessageBoxIcon.Error); }
         }
         finally { _editing = false; }
     }
@@ -96,7 +96,7 @@ internal sealed class TrayContext : ApplicationContext
     private void StartMonitor()
     {
         _monitorCancel?.Cancel();
-        if (!_store.HasSecret) { ShowError("Keine Zugangsdaten gespeichert."); return; }
+        if (!_store.HasSecret) { ShowError("No API credentials have been saved."); return; }
         try { _settings.Validate(); }
         catch (Exception e) { ShowError(e.Message); return; }
         var cancel = CancellationTokenSource.CreateLinkedTokenSource(_lifetime.Token);
@@ -109,7 +109,7 @@ internal sealed class TrayContext : ApplicationContext
     {
         using var threeHttp = new HttpClient { Timeout = TimeSpan.FromSeconds(15) };
         using var hubHttp = new HttpClient { Timeout = TimeSpan.FromSeconds(5) };
-        using var api = new ThreeCxApi(threeHttp, settings, _store.LoadSecret());
+        using var api = new PbxApiClient(threeHttp, settings, _store.LoadSecret());
         var terminalSession = SystemInformation.TerminalServerSession;
         var hub = new KuandoHub(hubHttp, settings, terminalSession);
         var dedup = new EventDeduplicator();
@@ -138,7 +138,7 @@ internal sealed class TrayContext : ApplicationContext
                     var presence = await api.GetPresenceAsync(ct);
                     presenceValue = StatusLogic.NormalizePresence(presence.Profile);
                     if (presenceValue.Length == 0)
-                        throw new InvalidOperationException("Unbekanntes 3CX-Präsenzprofil: " + presence.Profile);
+                        throw new InvalidOperationException("Unrecognized 3CX presence profile: " + presence.Profile);
                     if (_lastPresence != presenceValue)
                         DiagnosticLog.Write("3CX Presence detected", presenceValue);
                     _lastPresence = presenceValue;
@@ -200,7 +200,7 @@ internal sealed class TrayContext : ApplicationContext
                             }
                         }
                     }
-                    else problems.Add("kuandoHUB nicht erreichbar: " + hub.EndpointLabel);
+                    else problems.Add("kuandoHUB unreachable: " + hub.EndpointLabel);
                 }
                 catch (OperationCanceledException) when (ct.IsCancellationRequested) { break; }
                 catch (Exception ex) { problems.Add("kuandoHUB: " + DiagnosticLog.SafeError(ex)); }

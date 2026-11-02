@@ -1,4 +1,4 @@
-namespace ThreeCxKuando.Core;
+namespace KuandoConnector.Core;
 
 public static class StatusLogic
 {

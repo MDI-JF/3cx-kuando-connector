@@ -1,4 +1,4 @@
-namespace ThreeCxKuando.Core;
+namespace KuandoConnector.Core;
 
 public sealed class AppSettings
 {
@@ -14,12 +14,12 @@ public sealed class AppSettings
     {
         if (!Uri.TryCreate(PbxUrl, UriKind.Absolute, out var uri) ||
             uri.Scheme != Uri.UriSchemeHttps || !string.IsNullOrEmpty(uri.UserInfo))
-            throw new ArgumentException("3CX-Server muss eine HTTPS-Adresse ohne Benutzerinfo sein.");
-        if (string.IsNullOrWhiteSpace(ClientId)) throw new ArgumentException("API Client ID fehlt.");
-        if (string.IsNullOrWhiteSpace(Extension)) throw new ArgumentException("Nebenstelle fehlt.");
-        if (PollSeconds < 2 || PollSeconds > 60) throw new ArgumentException("Intervall muss 2–60 Sekunden betragen.");
+            throw new ArgumentException("3CX server must use HTTPS and must not include user credentials.");
+        if (string.IsNullOrWhiteSpace(ClientId)) throw new ArgumentException("API client ID is required.");
+        if (string.IsNullOrWhiteSpace(Extension)) throw new ArgumentException("Extension number is required.");
+        if (PollSeconds < 2 || PollSeconds > 60) throw new ArgumentException("Polling interval must be between 2 and 60 seconds.");
         if (EventStyles is null || DefaultStyles.Create().Keys.Except(EventStyles.Keys).Any())
-            throw new ArgumentException("Mindestens eine Ereignisfarbe fehlt.");
+            throw new ArgumentException("One or more event styles are missing.");
         foreach (var style in EventStyles.Values) style.Validate();
         if (!string.IsNullOrWhiteSpace(KuandoUrlOverride))
             _ = KuandoEndpointResolver.ValidateLoopback(KuandoUrlOverride);
@@ -32,7 +32,7 @@ public sealed record LightStyle(string Action, int Red, int Green, int Blue)
     {
         if (Action is not ("Light" or "Blink" or "Pulse") ||
             Red is < 0 or > 100 || Green is < 0 or > 100 || Blue is < 0 or > 100)
-            throw new ArgumentException("Ungültiger Leuchteffekt oder RGB-Wert (0–100).");
+            throw new ArgumentException("Invalid light effect or RGB value (0-100).");
     }
 }
 

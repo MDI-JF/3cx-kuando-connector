@@ -1,5 +1,0 @@
-<Solution>
-  <Project Path="src/ThreeCxKuando.Core/ThreeCxKuando.Core.csproj" />
-  <Project Path="src/ThreeCxKuando.App/ThreeCxKuando.App.csproj" />
-  <Project Path="tests/ThreeCxKuando.Core.Tests/ThreeCxKuando.Core.Tests.csproj" />
-</Solution>
