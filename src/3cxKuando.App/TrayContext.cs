@@ -165,11 +165,29 @@ internal sealed class TrayContext : ApplicationContext
                 catch (OperationCanceledException) when (ct.IsCancellationRequested) { break; }
                 catch (Exception ex) { problems.Add("Call Control: " + ex.Message); }
 
+                // A completed call must not wait for a potentially timed-out
+                // registration refresh. A failed Off remains pending for retry.
+                if (callValue == "Idle" && callEvents.ShouldPublish("Idle"))
+                {
+                    try
+                    {
+                        await hub.SendCallAsync("Idle", ct);
+                        callEvents.MarkPublished("Idle");
+                        _lastCallSent = "Off";
+                        DiagnosticLog.Write("kuandoHUB 3CX Call sent", "Off");
+                    }
+                    catch (OperationCanceledException) when (ct.IsCancellationRequested) { break; }
+                    catch (Exception ex)
+                    {
+                        problems.Add("kuandoHUB Call Off: " + DiagnosticLog.SafeError(ex));
+                    }
+                }
+
                 try
                 {
                     if (await hub.EnsureRegisteredAsync(ct))
                     {
-                        // Never let a failed presence POST suppress the pending Call Off.
+                        // Failed presence requests must not block call signaling.
                         if (presenceValue is not null &&
                             dedup.ShouldSend(KuandoProtocol.PresenceSource, presenceValue))
                         {
@@ -184,7 +202,7 @@ internal sealed class TrayContext : ApplicationContext
                                 problems.Add("kuandoHUB Presence: " + DiagnosticLog.SafeError(ex));
                             }
                         }
-                        if (callValue is not null && callEvents.ShouldPublish(callValue))
+                        if (callValue is not null && callValue != "Idle" && callEvents.ShouldPublish(callValue))
                         {
                             try
                             {
