@@ -1,5 +1,4 @@
 using Xunit;
-using System.Text.Json;
 using KuandoConnector.Core;
 
 namespace KuandoConnector.Core.Tests;
@@ -30,111 +29,35 @@ public class StatusTests
     public void OnlyDeduplicatesConfirmedEvents()
     {
         var dedup = new EventDeduplicator();
-        Assert.True(dedup.ShouldSend(KuandoProtocol.Source, KuandoProtocol.PresenceEventType, "Away"));
-        dedup.MarkSent(KuandoProtocol.Source, KuandoProtocol.PresenceEventType, "Away");
-        Assert.False(dedup.ShouldSend(KuandoProtocol.Source, KuandoProtocol.PresenceEventType, "Away"));
-        Assert.True(dedup.ShouldSend(KuandoProtocol.Source, KuandoProtocol.PresenceEventType, "Available"));
+        Assert.True(dedup.ShouldSend(HubEvents.Source, HubEvents.Presence, "Away"));
+        dedup.MarkSent(HubEvents.Source, HubEvents.Presence, "Away");
+        Assert.False(dedup.ShouldSend(HubEvents.Source, HubEvents.Presence, "Away"));
+        Assert.True(dedup.ShouldSend(HubEvents.Source, HubEvents.Presence, "Available"));
         dedup.Reset();
-        Assert.True(dedup.ShouldSend(KuandoProtocol.Source, KuandoProtocol.PresenceEventType, "Away"));
+        Assert.True(dedup.ShouldSend(HubEvents.Source, HubEvents.Presence, "Away"));
     }
 
     [Fact]
     public void SharedSenderDoesNotMixPresenceAndAlertDeduplication()
     {
         var dedup = new EventDeduplicator();
-        string sender = KuandoProtocol.Source;
+        string sender = HubEvents.Source;
 
-        dedup.MarkSent(sender, KuandoProtocol.PresenceEventType, "Away");
-        Assert.True(dedup.ShouldSend(sender, KuandoProtocol.CallEventType, "Away"));
-        dedup.MarkSent(sender, KuandoProtocol.CallEventType, "Away");
+        dedup.MarkSent(sender, HubEvents.Presence, "Away");
+        Assert.True(dedup.ShouldSend(sender, HubEvents.Alert, "Away"));
+        dedup.MarkSent(sender, HubEvents.Alert, "Away");
 
         // An Alert update (including one with the same event name) cannot alter Presence.
-        Assert.False(dedup.ShouldSend(sender, KuandoProtocol.PresenceEventType, "Away"));
-        dedup.MarkSent(sender, KuandoProtocol.CallEventType, "Connected");
-        Assert.False(dedup.ShouldSend(sender, KuandoProtocol.PresenceEventType, "Away"));
-        Assert.False(dedup.ShouldSend(sender, KuandoProtocol.CallEventType, "Connected"));
-        Assert.True(dedup.ShouldSend(sender, KuandoProtocol.CallEventType, "Ringing"));
+        Assert.False(dedup.ShouldSend(sender, HubEvents.Presence, "Away"));
+        dedup.MarkSent(sender, HubEvents.Alert, "Connected");
+        Assert.False(dedup.ShouldSend(sender, HubEvents.Presence, "Away"));
+        Assert.False(dedup.ShouldSend(sender, HubEvents.Alert, "Connected"));
+        Assert.True(dedup.ShouldSend(sender, HubEvents.Alert, "Ringing"));
 
         // A reconnection invalidates both checkpoints independently.
         dedup.Reset();
-        Assert.True(dedup.ShouldSend(sender, KuandoProtocol.PresenceEventType, "Away"));
-        Assert.True(dedup.ShouldSend(sender, KuandoProtocol.CallEventType, "Connected"));
-    }
-
-    [Fact]
-    public void RdsNeverGuessesPort()
-    {
-        Assert.Null(KuandoEndpointResolver.Resolve(null, null, true));
-        Assert.Equal(8989, KuandoEndpointResolver.Resolve(null, null, false)!.Port);
-        Assert.Equal(10980, KuandoEndpointResolver.Resolve(null, 10980, true)!.Port);
-        Assert.Throws<ArgumentException>(() =>
-            KuandoEndpointResolver.Resolve("http://evil.example.com:8989/", null, false));
-        Assert.Throws<ArgumentException>(() =>
-            KuandoEndpointResolver.Resolve("http://localhost:8989/steal", null, false));
-    }
-
-    [Theory]
-    [InlineData("Presence", "Available")]
-    [InlineData("Alert", "Connected")]
-    public void SignalUsesOneSourceAndSemanticEventType(string type, string name)
-    {
-        var style = DefaultStyles.Create()[name];
-        using var body = JsonDocument.Parse(KuandoProtocol.Signal(type, name, style));
-        Assert.Equal("Light", body.RootElement.GetProperty("action").GetString());
-        Assert.Equal(KuandoProtocol.Source, body.RootElement.GetProperty("sender").GetString());
-        Assert.Equal(type, body.RootElement.GetProperty("eventtype").GetString());
-        Assert.Equal(name, body.RootElement.GetProperty("eventname").GetString());
-        using var color = JsonDocument.Parse(body.RootElement.GetProperty("parameter").GetString()!);
-        Assert.Equal(style.Red, color.RootElement.GetProperty("RedRgbValue").GetInt32());
-        Assert.Equal(style.Green, color.RootElement.GetProperty("GreenRgbValue").GetInt32());
-        Assert.Equal(style.Blue, color.RootElement.GetProperty("BlueRgbValue").GetInt32());
-    }
-
-    [Fact]
-    public void RegistrationHasOneSourceTwoTypesAndNoOffEvent()
-    {
-        using var payload = JsonDocument.Parse(KuandoProtocol.Register());
-        Assert.Equal("RegisterDataSource", payload.RootElement.GetProperty("action").GetString());
-        using var definition = JsonDocument.Parse(payload.RootElement.GetProperty("parameter").GetString()!);
-        Assert.Equal(KuandoProtocol.Source, definition.RootElement.GetProperty("DataSourceName").GetString());
-        var groups = definition.RootElement.GetProperty("eventnames");
-        Assert.Equal(2, groups.EnumerateObject().Count());
-        Assert.Equal(new[] { "Available", "Away", "OutOfOffice", "Custom1", "Custom2" },
-            groups.GetProperty("Presence").GetProperty("EventNames").EnumerateArray().Select(x => x.GetString()));
-        Assert.Equal(new[] { "Dialing", "Ringing", "Connected", "Hold", "Held" },
-            groups.GetProperty("Alert").GetProperty("EventNames").EnumerateArray().Select(x => x.GetString()));
-        foreach (var group in groups.EnumerateObject())
-        {
-            Assert.False(group.Value.GetProperty("IsAlertPriority").GetBoolean());
-            Assert.DoesNotContain(group.Value.GetProperty("EventNames").EnumerateArray(),
-                x => x.GetString() == "Off");
-        }
-    }
-
-    [Theory]
-    [InlineData("Presence")]
-    [InlineData("Alert")]
-    public void InitialPriorityFiltersTypeButIncludesAllItsEvents(string type)
-    {
-        using var body = JsonDocument.Parse(KuandoProtocol.InitialPriority(type));
-        Assert.Equal("CreateInitialPriority", body.RootElement.GetProperty("action").GetString());
-        using var priority = JsonDocument.Parse(body.RootElement.GetProperty("parameter").GetString()!);
-        Assert.True(priority.RootElement.GetProperty("enabled").GetBoolean());
-        Assert.Equal(KuandoProtocol.Source, priority.RootElement.GetProperty("sender").GetString());
-        Assert.Equal(type, priority.RootElement.GetProperty("eventtype").GetString());
-        Assert.Empty(priority.RootElement.GetProperty("eventnames").EnumerateArray());
-        Assert.False(priority.RootElement.GetProperty("IsAlertPriority").GetBoolean());
-    }
-
-    [Fact]
-    public void OffIsAnActionNotASelectableEvent()
-    {
-        using var body = JsonDocument.Parse(KuandoProtocol.OffCall());
-        Assert.Equal("Off", body.RootElement.GetProperty("action").GetString());
-        Assert.Equal(KuandoProtocol.Source, body.RootElement.GetProperty("sender").GetString());
-        Assert.Equal("Alert", body.RootElement.GetProperty("eventtype").GetString());
-        Assert.Equal("Off", body.RootElement.GetProperty("eventname").GetString());
-        Assert.Equal("", body.RootElement.GetProperty("parameter").GetString());
+        Assert.True(dedup.ShouldSend(sender, HubEvents.Presence, "Away"));
+        Assert.True(dedup.ShouldSend(sender, HubEvents.Alert, "Connected"));
     }
 
     [Fact]
@@ -148,21 +71,6 @@ public class StatusTests
         Assert.Throws<ArgumentException>(() => settings.Validate());
     }
 
-    [Theory]
-    [InlineData("Dialing", "Light")]
-    [InlineData("Ringing", "Blink")]
-    [InlineData("Connected", "Light")]
-    [InlineData("Hold", "Pulse")]
-    [InlineData("Held", "Pulse")]
-    public void CallAnimationsAlwaysUseAlertEventType(string name, string action)
-    {
-        using var body = JsonDocument.Parse(KuandoProtocol.Signal(
-            KuandoProtocol.CallEventType, name, DefaultStyles.Create()[name]));
-        Assert.Equal(action, body.RootElement.GetProperty("action").GetString());
-        Assert.Equal("Alert", body.RootElement.GetProperty("eventtype").GetString());
-        Assert.Equal(KuandoProtocol.Source, body.RootElement.GetProperty("sender").GetString());
-    }
-
     [Fact]
     public void CallFinishesWithExactlyOneOffRatherThanPermanentIdlePriority()
     {
@@ -174,7 +82,7 @@ public class StatusTests
         Assert.True(state.ShouldPublish("Connected"));
         state.MarkPublished("Connected");
         Assert.True(state.ShouldPublish("Idle"));  // ending an actual call
-        // An HTTP failure must not accidentally consume the Off transition:
+        // A failed SDK event must not accidentally consume the Off transition:
         Assert.True(state.ShouldPublish("Idle"));
         state.MarkPublished("Idle");
         Assert.False(state.ShouldPublish("Idle"));
