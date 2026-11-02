@@ -50,37 +50,68 @@ public class StatusTests
             KuandoEndpointResolver.Resolve("http://localhost:8989/steal", null, false));
     }
 
-    [Fact]
-    public void PayloadUsesJsonEncodedParameterString()
+    [Theory]
+    [InlineData("Presence", "Available")]
+    [InlineData("Alert", "Connected")]
+    public void SignalUsesOneSourceAndSemanticEventType(string type, string name)
     {
-        string json = KuandoProtocol.Signal("3CX Presence", "Available", new LightStyle("Light", 0, 100, 0));
-        using var body = JsonDocument.Parse(json);
+        var style = DefaultStyles.Create()[name];
+        using var body = JsonDocument.Parse(KuandoProtocol.Signal(type, name, style));
         Assert.Equal("Light", body.RootElement.GetProperty("action").GetString());
-        Assert.Equal("3CX Presence", body.RootElement.GetProperty("sender").GetString());
-        string nested = body.RootElement.GetProperty("parameter").GetString()!;
-        using var color = JsonDocument.Parse(nested);
-        Assert.Equal(100, color.RootElement.GetProperty("GreenRgbValue").GetInt32());
+        Assert.Equal(KuandoProtocol.Source, body.RootElement.GetProperty("sender").GetString());
+        Assert.Equal(type, body.RootElement.GetProperty("eventtype").GetString());
+        Assert.Equal(name, body.RootElement.GetProperty("eventname").GetString());
+        using var color = JsonDocument.Parse(body.RootElement.GetProperty("parameter").GetString()!);
+        Assert.Equal(style.Red, color.RootElement.GetProperty("RedRgbValue").GetInt32());
+        Assert.Equal(style.Green, color.RootElement.GetProperty("GreenRgbValue").GetInt32());
+        Assert.Equal(style.Blue, color.RootElement.GetProperty("BlueRgbValue").GetInt32());
     }
 
     [Fact]
-    public void RegisterIncludesSeparateSources()
+    public void RegistrationHasOneSourceTwoTypesAndNoOffEvent()
     {
-        var styles = DefaultStyles.Create();
-        foreach (var source in new[] { KuandoProtocol.CallSource, KuandoProtocol.PresenceSource })
+        using var payload = JsonDocument.Parse(KuandoProtocol.Register());
+        Assert.Equal("RegisterDataSource", payload.RootElement.GetProperty("action").GetString());
+        using var definition = JsonDocument.Parse(payload.RootElement.GetProperty("parameter").GetString()!);
+        Assert.Equal(KuandoProtocol.Source, definition.RootElement.GetProperty("DataSourceName").GetString());
+        var groups = definition.RootElement.GetProperty("eventnames");
+        Assert.Equal(2, groups.EnumerateObject().Count());
+        Assert.Equal(new[] { "Available", "Away", "OutOfOffice", "Custom1", "Custom2" },
+            groups.GetProperty("Presence").GetProperty("EventNames").EnumerateArray().Select(x => x.GetString()));
+        Assert.Equal(new[] { "Dialing", "Ringing", "Connected", "Hold", "Held" },
+            groups.GetProperty("Alert").GetProperty("EventNames").EnumerateArray().Select(x => x.GetString()));
+        foreach (var group in groups.EnumerateObject())
         {
-            using var json = JsonDocument.Parse(KuandoProtocol.Register(source, styles));
-            Assert.Equal(source, json.RootElement.GetProperty("parameter").GetString() is string value
-                ? JsonDocument.Parse(value).RootElement.GetProperty("DataSourceName").GetString()
-                : null);
+            Assert.False(group.Value.GetProperty("IsAlertPriority").GetBoolean());
+            Assert.DoesNotContain(group.Value.GetProperty("EventNames").EnumerateArray(),
+                x => x.GetString() == "Off");
         }
     }
 
-    [Fact]
-    public void OffHasCorrectSender()
+    [Theory]
+    [InlineData("Presence")]
+    [InlineData("Alert")]
+    public void InitialPriorityFiltersTypeButIncludesAllItsEvents(string type)
     {
-        using var json = JsonDocument.Parse(KuandoProtocol.OffCall());
-        Assert.Equal("Off", json.RootElement.GetProperty("action").GetString());
-        Assert.Equal("3CX Call", json.RootElement.GetProperty("sender").GetString());
+        using var body = JsonDocument.Parse(KuandoProtocol.InitialPriority(type));
+        Assert.Equal("CreateInitialPriority", body.RootElement.GetProperty("action").GetString());
+        using var priority = JsonDocument.Parse(body.RootElement.GetProperty("parameter").GetString()!);
+        Assert.True(priority.RootElement.GetProperty("enabled").GetBoolean());
+        Assert.Equal(KuandoProtocol.Source, priority.RootElement.GetProperty("sender").GetString());
+        Assert.Equal(type, priority.RootElement.GetProperty("eventtype").GetString());
+        Assert.Empty(priority.RootElement.GetProperty("eventnames").EnumerateArray());
+        Assert.False(priority.RootElement.GetProperty("IsAlertPriority").GetBoolean());
+    }
+
+    [Fact]
+    public void OffIsAnActionNotASelectableEvent()
+    {
+        using var body = JsonDocument.Parse(KuandoProtocol.OffCall());
+        Assert.Equal("Off", body.RootElement.GetProperty("action").GetString());
+        Assert.Equal(KuandoProtocol.Source, body.RootElement.GetProperty("sender").GetString());
+        Assert.Equal("Alert", body.RootElement.GetProperty("eventtype").GetString());
+        Assert.Equal("Off", body.RootElement.GetProperty("eventname").GetString());
+        Assert.Equal("", body.RootElement.GetProperty("parameter").GetString());
     }
 
     [Fact]
@@ -100,22 +131,13 @@ public class StatusTests
     [InlineData("Connected", "Light")]
     [InlineData("Hold", "Pulse")]
     [InlineData("Held", "Pulse")]
-    public void EveryCallAnimationSharesTheOffPriorityCategory(string state, string expectedAction)
+    public void CallAnimationsAlwaysUseAlertEventType(string name, string action)
     {
-        var styles = DefaultStyles.Create();
-        using var payload = JsonDocument.Parse(
-            KuandoProtocol.Signal(KuandoProtocol.CallSource, state, styles[state]));
-        Assert.Equal(expectedAction, payload.RootElement.GetProperty("action").GetString());
-        Assert.Equal("Light", payload.RootElement.GetProperty("eventtype").GetString());
-        using var registration = JsonDocument.Parse(
-            KuandoProtocol.Register(KuandoProtocol.CallSource, styles));
-        var parameter = registration.RootElement.GetProperty("parameter").GetString()!;
-        using var dataSource = JsonDocument.Parse(parameter);
-        var names = dataSource.RootElement.GetProperty("eventnames")
-            .GetProperty("Light").GetProperty("EventNames")
-            .EnumerateArray().Select(e => e.GetString()).ToArray();
-        Assert.Contains(state, names);
-        Assert.Contains("Off", names);
+        using var body = JsonDocument.Parse(KuandoProtocol.Signal(
+            KuandoProtocol.CallEventType, name, DefaultStyles.Create()[name]));
+        Assert.Equal(action, body.RootElement.GetProperty("action").GetString());
+        Assert.Equal("Alert", body.RootElement.GetProperty("eventtype").GetString());
+        Assert.Equal(KuandoProtocol.Source, body.RootElement.GetProperty("sender").GetString());
     }
 
     [Fact]

@@ -4,11 +4,11 @@ Windows tray connector for **3CX v20 Presence** and **Call Control**, using the 
 
 ## Status
 
-**Early development / pre-release.** The integration has not yet been validated against a live kuandoHUB / 3CX production environment. The source is intended for testing; verify all light patterns and source-priority behavior before relying on it.
+**Early development / pre-release.** The kuandoHUB HTTP POST and priority-release protocol were validated through PowerShell against a live kuandoHUB, with one source and separate Presence/Alert priorities. The updated C# application and physical light effects still need field validation.
 
 ## Features
 
-- Two independent kuandoHUB sources: `3CX Presence` and `3CX Call`
+- One kuandoHUB source, `3CX Connector`, with separately configurable `Presence` and `Alert` event-type priorities
 - Presence profiles via 3CX XAPI; call state via Call Control REST + WebSocket updates
 - Automatic reconnect and OAuth token renewal
 - Per-Windows-user configuration in `%APPDATA%\3cxKuando`
@@ -40,10 +40,14 @@ Windows CI compiles an installer using Inno Setup 6. Official manual releases ca
 1. Install the Windows installer and start the tray application.
 2. Enter HTTPS PBX URL, service principal client ID, secret, and extension.
 3. Configure kuandoHUB HTTP POST in kuandoHUB settings.
-4. The connector registers `3CX Presence` and `3CX Call` sources and sends status changes; kuandoHUB applies the configured priorities.
+4. The connector registers one `3CX Connector` source with two event types (`Presence` and `Alert`) and adds two priority entries: `Presence / All events` and `Alert / All events`. In kuandoHUB, place `Alert` above `Presence` when calls must override presence. Other applications can be interleaved according to user preference.
 5. On RDS, provide a session-specific kuandoHUB endpoint if its `http_port` registry value is unavailable; the connector deliberately does not guess port 8989.
 
-The connector does **not** switch the light off on 3CX connection loss. When a call legitimately ends, it sends the sender-specific kuandoHUB `Off` action; the exact priority semantics still require a device integration test.
+The connector does **not** send an artificial Off on 3CX connection loss. When a call legitimately ends, it sends `action: Off` with `sender: 3CX Connector` and `eventtype: Alert` to release the call priority. Presence stays active until its value changes; when the call priority is released, kuandoHUB can resume the existing Presence event without a repeated POST. `Off` is a control action, **not** a selectable event. No automatic green fallback is sent on an unknown status.
+
+**Migration from previous development versions:** Older builds registered `3CX Presence` and `3CX Call` with `Light / All` priorities. These old entries can remain in kuandoHUB; after confirming the new `3CX Connector` source and its two explicitly typed priorities, remove the obsolete entries **manually** from kuandoHUB. This connector intentionally does not delete, rearrange, or overwrite customized priority entries. The actual order established by `CreateInitialPriority` can depend on kuandoHUB's insertion behavior, so verify it in the UI.
+
+**Multiple presence providers:** Consider choosing just one general/background presence provider when 3CX, Teams and Outlook are installed together. Other integrations can still supply focused call or meeting overrides. Both event types are transmitted only on change, startup or re-registration; ongoing presence does not require constant re-posting.
 
 ## Security
 
@@ -55,7 +59,7 @@ All settings are per user. API secret storage uses DPAPI CurrentUser. A user wit
 
 ## Testing notes
 
-The automated tests cover foundational state, validation and protocol behaviors. Complete coverage of WinForms, DPAPI, WebSocket, installation and hardware interaction remains future work; the current project **does not claim 100% line coverage**.
+The automated tests exercise the single-source registration, explicit event-type priorities, all call animations, Off semantics, HTTP connection behavior and retry logic, as well as state and validation behavior. Windows CI captures Cobertura coverage reports. Coverage of WinForms, DPAPI, WebSocket, installation and hardware interactions remains incomplete; **100% total line coverage is not claimed**.
 
 ## Diagnostics
 

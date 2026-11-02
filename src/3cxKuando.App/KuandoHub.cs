@@ -43,10 +43,13 @@ internal sealed class KuandoHub
         if (!_registration.IsDue) return true;
         try
         {
-            await PostAsync(KuandoProtocol.Register(KuandoProtocol.PresenceSource, _settings.EventStyles), "Register Presence", ct);
-            await PostAsync(KuandoProtocol.Register(KuandoProtocol.CallSource, _settings.EventStyles), "Register Call", ct);
-            await PostAsync(KuandoProtocol.InitialPriority(KuandoProtocol.PresenceSource), "CreateInitialPriority Presence", ct);
-            await PostAsync(KuandoProtocol.InitialPriority(KuandoProtocol.CallSource), "CreateInitialPriority Call", ct);
+            await PostAsync(KuandoProtocol.Register(), "Register 3CX Connector", ct);
+            // The last created entry appeared first in the tested kuandoHUB.
+            // Create Presence before Alert; user-defined order remains editable.
+            await PostAsync(KuandoProtocol.InitialPriority(KuandoProtocol.PresenceEventType),
+                "CreateInitialPriority Presence", ct);
+            await PostAsync(KuandoProtocol.InitialPriority(KuandoProtocol.CallEventType),
+                "CreateInitialPriority Alert", ct);
             _registration.Registered();
             // Reapply the last known states after a periodic re-registration: kuandoHUB
             // might have restarted without an intervening status event.
@@ -68,7 +71,7 @@ internal sealed class KuandoHub
     {
         try
         {
-            await PostAsync(KuandoProtocol.Signal(KuandoProtocol.PresenceSource,
+            await PostAsync(KuandoProtocol.Signal(KuandoProtocol.PresenceEventType,
                 eventName, _settings.EventStyles[eventName]), "Presence " + eventName, ct);
         }
         catch { _registration.Invalidate(); throw; }
@@ -79,7 +82,7 @@ internal sealed class KuandoHub
         try
         {
             await PostAsync(eventName == "Idle" ? KuandoProtocol.OffCall() :
-                KuandoProtocol.Signal(KuandoProtocol.CallSource, eventName, _settings.EventStyles[eventName]),
+                KuandoProtocol.Signal(KuandoProtocol.CallEventType, eventName, _settings.EventStyles[eventName]),
                 eventName == "Idle" ? "Call Off" : "Call " + eventName, ct);
         }
         catch { _registration.Invalidate(); throw; }
@@ -90,8 +93,13 @@ internal sealed class KuandoHub
         if (_url is null) throw new InvalidOperationException("Unable to determine the kuandoHUB port.");
         try
         {
-            using var content = new StringContent(json, Encoding.UTF8, "application/json");
-            using var response = await _http.PostAsync(_url, content, ct);
+            using var request = new HttpRequestMessage(HttpMethod.Post, _url)
+            {
+                Content = new StringContent(json, Encoding.UTF8, "application/json")
+            };
+            // Match the verified PowerShell POC (-DisableKeepAlive).
+            request.Headers.ConnectionClose = true;
+            using var response = await _http.SendAsync(request, ct);
             DiagnosticLog.Write("kuandoHUB HTTP",
                 operation + " -> HTTP " + (int)response.StatusCode);
             response.EnsureSuccessStatusCode();
