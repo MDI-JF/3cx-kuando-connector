@@ -1,0 +1,57 @@
+name: Windows CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  test-build:
+    runs-on: windows-2022
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+      - name: Restore
+        run: dotnet restore ThreeCxKuando.slnx
+      - name: Build and warn on compilation issues
+        run: dotnet build ThreeCxKuando.slnx --configuration Release --no-restore
+      - name: Run tests and collect coverage
+        run: dotnet test tests/ThreeCxKuando.Core.Tests/ThreeCxKuando.Core.Tests.csproj --configuration Release --no-build --collect:"XPlat Code Coverage" --results-directory TestResults
+      - name: Preserve coverage reports
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: coverage
+          path: TestResults/**/coverage.cobertura.xml
+          if-no-files-found: warn
+      - name: Publish self-contained Windows application
+        run: dotnet publish src/ThreeCxKuando.App/ThreeCxKuando.App.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -p:DebugType=None -o artifacts/publish
+      - name: Compile installer with Inno Setup
+        shell: pwsh
+        run: |
+          choco install innosetup -y --no-progress
+          $iscc = Join-Path ${env:ProgramFiles(x86)} 'Inno Setup 6\ISCC.exe'
+          if (!(Test-Path $iscc)) { throw "Missing Inno Setup compiler: $iscc" }
+          & $iscc "/DAppVersion=0.1.0-ci" "/DPublishDir=$((Resolve-Path artifacts/publish).Path)" installer/ThreeCxKuando.iss
+          if ($LASTEXITCODE -ne 0) { throw 'Installer compilation failed' }
+      - name: Verify install package exists
+        shell: pwsh
+        run: |
+          if (-not (Get-ChildItem artifacts -Filter '*setup.exe')) { throw 'No installer produced' }
+      - name: Upload installable CI build
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-installer-ci
+          path: artifacts/*setup.exe
+          if-no-files-found: error
