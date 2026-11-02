@@ -40,3 +40,16 @@ foreach(var ctor in type.GetConstructors())
     "  PARAM: " + p.Name + " type=" + p.ParameterType + " optional="+p.IsOptional);
 }
 Console.WriteLine("PROPERTIES: " + string.Join(", ",type.GetProperties().Select(p=>p.Name)));
+
+Console.WriteLine("XML DOCUMENTATION FOR SDK:");
+foreach (var xmlPath in Directory.GetFiles(packageDir, "BusylightSDK.xml", SearchOption.AllDirectories))
+{
+  var doc = XDocument.Load(xmlPath);
+  foreach(var m in doc.Descendants().Where(x=>x.Name.LocalName=="member"))
+  {
+    var name=(string?)m.Attribute("name")??"";
+    if(name.Contains("KuandoSDK") || name.Contains("IsHubConnected") || name.Contains("slavemode") ||
+       name.Contains("EndEvent") || name.Contains("RegisterDataSource"))
+        Console.WriteLine("DOC " + name + "\n" + m.ToString(SaveOptions.DisableFormatting));
+  }
+}
