@@ -27,7 +27,7 @@ jobs:
       - name: Build and warn on compilation issues
         run: dotnet build 3cxKuando.slnx --configuration Release --no-restore
       - name: Run tests and collect coverage
-        run: dotnet test tests/3cxKuando.Core.Tests/3cxKuando.Core.Tests.csproj --configuration Release --no-build --collect:"XPlat Code Coverage" --results-directory TestResults
+        run: dotnet test 3cxKuando.slnx --configuration Release --no-build --collect:"XPlat Code Coverage" --results-directory TestResults
       - name: Preserve coverage reports
         uses: actions/upload-artifact@v4
         if: always()
