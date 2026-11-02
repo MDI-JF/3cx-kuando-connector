@@ -23,12 +23,15 @@ public static class StatusLogic
 
 public sealed class EventDeduplicator
 {
-    private readonly Dictionary<string, string> _sent = new(StringComparer.Ordinal);
+    // kuandoHUB uses one sender for Presence and Alert. These are independent
+    // logical channels: a call update must never replace a presence checkpoint.
+    private readonly Dictionary<(string Sender, string EventType), string> _sent = new();
 
-    public bool ShouldSend(string source, string state) =>
-        !_sent.TryGetValue(source, out var last) || last != state;
+    public bool ShouldSend(string sender, string eventType, string state) =>
+        !_sent.TryGetValue((sender, eventType), out var last) || last != state;
 
-    public void MarkSent(string source, string state) => _sent[source] = state;
+    public void MarkSent(string sender, string eventType, string state) =>
+        _sent[(sender, eventType)] = state;
 
     public void Reset() => _sent.Clear();
 }
