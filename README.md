@@ -1,31 +1,34 @@
 # 3cxKuando
 
-Windows tray connector for **3CX v20 Presence** and **Call Control**, using the **kuandoHUB HTTP POST** integration.
+Windows tray connector for **3CX v20 Presence** and **Call Control**, integrated into **kuandoHUB using the official Plenom Busylight SDK**.
 
 ## Status
 
-**Early development / pre-release.** The kuandoHUB HTTP POST and priority-release protocol were validated through PowerShell against a live kuandoHUB, with one source and separate Presence/Alert priorities. The updated C# application and physical light effects still need field validation.
+**Early development / pre-release.** This branch uses the official `com.plenom.BusylightSDK` NuGet package, version `4.0.7`. SDK public methods were verified with a Windows .NET reflection probe. Automated tests cover the adapter boundary with a mock SDK; behavior with a physical light and an installed kuandoHUB must still be validated on Windows.
+
+The previously developed HTTP transport is archived separately in `legacy/http-transport` and is intentionally not part of `main`.
 
 ## Features
 
-- One kuandoHUB source, `3CX Connector`, with separately configurable `Presence` and `Alert` event-type priorities
-- Independent state/deduplication channels keyed by `(sender, event type)`; `Alert` changes never suppress a `Presence` update despite the shared sender
-- Presence profiles via 3CX XAPI; call state via Call Control REST + WebSocket updates
-- Automatic reconnect and OAuth token renewal
-- Per-Windows-user configuration in `%APPDATA%\3cxKuando`
-- Client secret encrypted using Windows DPAPI `CurrentUser` (not protection against processes running as the same user)
-- kuandoHUB auto-discovery via `HKCU\Software\Busylight\http_port` or `localhost:8989` on non-RDS systems
-- Windows tray settings, per-user logon start, independent call/presence state
+- One kuandoHUB data source, `3CX Connector`, with independently configurable `Presence` and `Alert` event-type priorities
+- Separate state channels keyed by `(sender, event type)` – an Alert event cannot overwrite Presence deduplication
+- Presence profiles from 3CX XAPI; call state from 3CX Call Control REST with WebSocket wake-ups
+- Automatic 3CX reconnect, OAuth token renewal, SDK re-registration and event replay
+- Per-Windows-user settings at `%APPDATA%\3cxKuando`; client secret protected using Windows DPAPI CurrentUser
+- Windows tray interface, per-user autostart, independent call and presence processing
 
 ## Requirements
 
-- Windows 10/11 or a supported Windows Server RDS session (x64)
+- Windows 10/11 or supported Windows Server user session (x64)
+- .NET 10 SDK for building; published installer provides a self-contained runtime
 - 3CX v20 service principal with Configuration API permission to read the target extension's `CurrentProfileName` and `IsRegistered`
-- Call Control permission with the extension assigned (required for call states)
-- kuandoHUB HTTP POST connector enabled
-- An active kuandoHUB instance in the current user session
+- Call Control permission with the target extension assigned
+- An installed, running, SDK-compatible kuandoHUB in **the same Windows user session** as the tray connector
+- Plenom SDK through NuGet (restored at build time). No HTTP API, HTTP port, access token, URL override or manual listener setup is needed.
 
-## Build
+**Priority safety:** The application integrates via kuandoHUB SDK mode, not direct USB control. Priority entries can be moved in kuandoHUB by the user; verify `Alert` is above `Presence` and that the relative order against Teams/Outlook is appropriate.
+
+## Build and automated tests
 
 ```powershell
 dotnet restore 3cxKuando.slnx
@@ -34,46 +37,50 @@ dotnet test 3cxKuando.slnx -c Release
 dotnet publish src/3cxKuando.App/3cxKuando.App.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -o artifacts/publish
 ```
 
-Windows CI compiles an installer using Inno Setup 6. Official manual releases can be dispatched via GitHub Actions / Publish Release, with `0.1.0-beta.1` for prereleases or `0.1.0` for stable releases.
+GitHub Actions builds and tests on Windows, collects coverage, and builds an Inno Setup 6 installer. Physical integration, SDK/kuandoHUB attachment, priority ordering, terminal sessions and animations require separate manual validation.
 
 ## Per-user setup
 
-1. Install the Windows installer and start the tray application.
-2. Enter HTTPS PBX URL, service principal client ID, secret, and extension.
-3. Configure kuandoHUB HTTP POST in kuandoHUB settings.
-4. The connector registers one `3CX Connector` source with two event types (`Presence` and `Alert`) and adds two priority entries: `Presence / All events` and `Alert / All events`. In kuandoHUB, place `Alert` above `Presence` when calls must override presence. Other applications can be interleaved according to user preference.
-5. On RDS, provide a session-specific kuandoHUB endpoint if its `http_port` registry value is unavailable; the connector deliberately does not guess port 8989.
+1. Install the Windows application and start its tray icon **in the interactive Windows user session**.
+2. Enter the HTTPS PBX URL, 3CX service-principal client ID, secret and extension.
+3. Ensure kuandoHUB is running. The official SDK discovers it automatically; there is no HTTP integration to enable.
+4. The connector registers one `3CX Connector` source with event types `Presence` and `Alert`, and requests separate `All events` priority entries. Adjust priorities in kuandoHUB so active calls can override Presence while preserving other applications' desired priorities.
 
-The connector does **not** send an artificial Off on 3CX connection loss. When a call legitimately ends, it sends `action: Off` with `sender: 3CX Connector` and `eventtype: Alert` to release the call priority. Presence stays active until its value changes; when the call priority is released, kuandoHUB can resume the existing Presence event without a repeated POST. `Off` is a control action, **not** a selectable event. No automatic green fallback is sent on an unknown status.
+Previous development builds may have left old `3CX Presence`, `3CX Call`, or duplicate `3CX Connector` priorities. After checking the new entries, remove obsolete duplicates **manually** in kuandoHUB. The application does not delete or rearrange user-customized entries.
 
-**Migration from previous development versions:** Older builds registered `3CX Presence` and `3CX Call` with `Light / All` priorities. These old entries can remain in kuandoHUB; after confirming the new `3CX Connector` source and its two explicitly typed priorities, remove the obsolete entries **manually** from kuandoHUB. This connector intentionally does not delete, rearrange, or overwrite customized priority entries. The actual order established by `CreateInitialPriority` can depend on kuandoHUB's insertion behavior, so verify it in the UI.
+## Event model and animations
 
-**Multiple presence providers:** Consider choosing just one general/background presence provider when 3CX, Teams and Outlook are installed together. Other integrations can still supply focused call or meeting overrides. Both event types are transmitted only on change, startup or re-registration; ongoing presence does not require constant re-posting.
+| 3CX state | kuandoHUB event type | Default effect |
+| --- | --- | --- |
+| Available | Presence | Light (green) |
+| Away | Presence | Light (yellow) |
+| OutOfOffice / DND | Presence | Light (purple) |
+| Custom1 / Custom2 | Presence | Light (configurable) |
+| Dialing | Alert | Light (blue) |
+| Ringing | Alert | Blink (blue) |
+| Connected | Alert | Light (red) |
+| Hold / Held | Alert | Pulse (red) |
+
+**Light** is steady illumination. **Blink** alternates between illuminated and off phases; by default the SDK receives values `5, 5` for on/off timing. **Pulse** gradually changes intensity using a seven-step sequence (3, 21, 36, 50, 36, 21, 10). Effect colors are specified on the same 0–100 scale as the existing configuration.
+
+When a call completes, the application uses the SDK's `EndEvent` for the `Alert` event type, without clearing `Presence`. `Off` is **not** a selectable call state or registered event name. No artificial Off is emitted at startup or on a failed 3CX read. Active calls are replayed after successful hub re-registration; a successfully ended call is not replayed.
+
+Important SDK behavior to field-check: the Plenom SDK identifies the event by type and name. Animation and priority handling must be checked with installed kuandoHUB, especially after reconnect and on multi-user hosts. The existence and signatures of the SDK methods have been verified, but real hardware behavior is not established by unit tests.
 
 ## Security
 
-All settings are per user. API secret storage uses DPAPI CurrentUser. A user with the same Windows account can extract secrets using custom code. Do not distribute an elevated shared 3CX client secret to untrusted endpoints without accepting this risk. No client secrets or tokens should be committed to GitHub.
+Credentials are specific to each Windows user. 3CX API client secrets are stored with DPAPI `CurrentUser`; this does not prevent another process running as the same user from extracting them. Do not deploy an elevated shared 3CX secret to untrusted endpoints without accepting this risk. Never commit tokens, secrets or call details.
 
 ## Licensing
 
-[PolyForm Noncommercial 1.0.0](LICENSE.md). Commercial use requires separate permission from the rights holder; the project is source-available, not OSI open source. The project does not claim endorsement by 3CX or Plenom.
-
-## Testing notes
-
-The automated tests exercise the single-source registration, explicit event-type priorities, all call animations, Off semantics, HTTP connection behavior and retry logic, as well as state and validation behavior. Windows CI captures Cobertura coverage reports. Coverage of WinForms, DPAPI, WebSocket, installation and hardware interactions remains incomplete; **100% total line coverage is not claimed**.
+[PolyForm Noncommercial 1.0.0](LICENSE.md). Commercial use requires the rights holder's permission. The application is source-available, not OSI-open-source, and is not affiliated with 3CX or Plenom.
 
 ## Diagnostics
 
-From the tray menu select **Open diagnostic log**. Per-user/per-session logs are
-stored at `%LOCALAPPDATA%\3cxKuando\events-session-<session-ID>.log`.
-The previous log is rotated as `.log.old` after about 512 KB.
-
-The log includes 3CX state changes, local kuandoHUB POST operations and their HTTP
-status (or exception class/socket code), registration failures and connection-health changes.
-Sensitive credentials, raw API payloads, token values, and caller details are not logged.
+Tray menu → **Open diagnostic log**. Session-scoped logs are stored under `%LOCALAPPDATA%\3cxKuando\events-session-<session-ID>.log` and rotated to `.log.old` after approximately 512 KB. Logs record 3CX observations, SDK registration, events and connection-health changes, without credentials, API payloads or caller details.
 
 The executable is `3cxKuando.exe`.
 
-## Development builds
+## Migration
 
-Only current `3cxKuando` configuration and log paths are supported; migration from older development builds is not included.
+No HTTP transport is shipped from `main`. Existing per-user JSON settings can retain obsolete fields from previous development builds; unknown fields are ignored by the current settings deserializer. The legacy branch remains available as a reference for the previous transport.
