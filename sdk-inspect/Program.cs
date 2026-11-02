@@ -1,27 +1,42 @@
 using System.Reflection;
-using System.Runtime.Loader;
-var candidates = Directory.GetFiles(AppContext.BaseDirectory, "*.dll")
-    .Where(p => Path.GetFileName(p).Contains("busy", StringComparison.OrdinalIgnoreCase)
-             || Path.GetFileName(p).Contains("plenom", StringComparison.OrdinalIgnoreCase)
-             || Path.GetFileName(p).Contains("kuando", StringComparison.OrdinalIgnoreCase)).ToList();
-foreach (var path in candidates)
+using System.Xml.Linq;
+
+var packageDir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
+    ".nuget", "packages", "com.plenom.busylightsdk", "4.0.7");
+Console.WriteLine("PACKAGE DIR: " + packageDir);
+if (!Directory.Exists(packageDir)) throw new DirectoryNotFoundException(packageDir);
+foreach (var file in Directory.GetFiles(packageDir, "*", SearchOption.AllDirectories))
 {
-    Console.WriteLine("ASSEMBLY FILE " + path);
-    Assembly assembly;
-    try { assembly = AssemblyLoadContext.Default.LoadFromAssemblyPath(path); }
-    catch(Exception e) { Console.WriteLine("LOAD ERROR " + e); continue; }
-    Console.WriteLine("SDK ASSEMBLY: "+assembly.FullName);
-    Type[] types;
-    try { types = assembly.GetExportedTypes(); }
-    catch(ReflectionTypeLoadException ex) { types = ex.Types.OfType<Type>().ToArray(); foreach(var e in ex.LoaderExceptions) Console.WriteLine("TYPE ERROR "+e); }
-    foreach (var t in types.OrderBy(t=>t.FullName))
+    var relative = Path.GetRelativePath(packageDir, file);
+    Console.WriteLine("FILE: " + relative);
+    if (relative.EndsWith(".nuspec", StringComparison.OrdinalIgnoreCase))
     {
-        Console.WriteLine("\nTYPE "+ t.FullName+" ["+(t.IsEnum?"enum":t.IsClass?"class":t.IsValueType?"struct":"other")+"]");
-        if(t.IsEnum) foreach(var n in Enum.GetNames(t)) Console.WriteLine(" ENUM "+n+" = "+Convert.ToInt64(Enum.Parse(t,n)));
-        foreach(var c in t.GetConstructors(BindingFlags.Public|BindingFlags.Instance)) Console.WriteLine(" CTOR "+c);
-        foreach(var p in t.GetProperties(BindingFlags.Public|BindingFlags.Instance|BindingFlags.Static|BindingFlags.DeclaredOnly)) Console.WriteLine(" PROP "+p.PropertyType.FullName+" "+p.Name+" get="+p.CanRead+" set="+p.CanWrite);
-        foreach(var f in t.GetFields(BindingFlags.Public|BindingFlags.Instance|BindingFlags.Static|BindingFlags.DeclaredOnly)) Console.WriteLine(" FIELD "+f.FieldType.FullName+" "+f.Name);
-        foreach(var m in t.GetMethods(BindingFlags.Public|BindingFlags.Instance|BindingFlags.Static|BindingFlags.DeclaredOnly).Where(m=>!m.IsSpecialName)) Console.WriteLine(" METHOD "+m);
+        var doc = XDocument.Load(file);
+        var md = doc.Root?.Elements().FirstOrDefault(e => e.Name.LocalName == "metadata");
+        foreach (var e in md?.Elements() ?? [])
+            if (new[]{"license","licenseUrl","copyright","authors","owners","projectUrl","repository","description"}.Contains(e.Name.LocalName))
+                Console.WriteLine("  META: " + e.Name.LocalName + "=" + e.ToString(SaveOptions.DisableFormatting));
+    }
+    if (Path.GetFileName(file).Contains("LICENSE", StringComparison.OrdinalIgnoreCase)
+        || Path.GetFileName(file).Contains("COPYING", StringComparison.OrdinalIgnoreCase)
+        || Path.GetFileName(file).Contains("NOTICE", StringComparison.OrdinalIgnoreCase))
+    {
+        if (new FileInfo(file).Length < 150000)
+            Console.WriteLine("  LICENSE CONTENT:\n" + File.ReadAllText(file));
     }
 }
-if(candidates.Count == 0) { Console.Error.WriteLine("No SDK candidate DLL found"); Environment.ExitCode=1; }
+var sdkDll = Directory.GetFiles(packageDir, "BusylightSDK.dll", SearchOption.AllDirectories)
+  .OrderBy(p => p.Contains("netcoreapp3.1") ? 0 : 1).First();
+var assy = Assembly.LoadFrom(sdkDll);
+Console.WriteLine("SDK: " + assy.FullName);
+foreach(var att in assy.GetCustomAttributesData())
+  if(att.AttributeType.Name.Contains("Company")||att.AttributeType.Name.Contains("Copyright")||att.AttributeType.Name.Contains("Description"))
+    Console.WriteLine("ATTRIBUTE: " + att);
+var type = assy.GetType("Busylight.KuandoSDK")!;
+foreach(var ctor in type.GetConstructors())
+{
+  Console.WriteLine("CONSTRUCTOR: " + ctor);
+  foreach(var p in ctor.GetParameters()) Console.WriteLine(
+    "  PARAM: " + p.Name + " type=" + p.ParameterType + " optional="+p.IsOptional);
+}
+Console.WriteLine("PROPERTIES: " + string.Join(", ",type.GetProperties().Select(p=>p.Name)));
