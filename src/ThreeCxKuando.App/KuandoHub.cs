@@ -32,11 +32,9 @@ internal sealed class KuandoHub
     public async Task<bool> EnsureRegisteredAsync(CancellationToken ct)
     {
         if (_url is null) return false;
-        if (_registered && DateTimeOffset.UtcNow - _lastCheck < TimeSpan.FromSeconds(60)) return true;
+        if (_registered) return true;
         try
         {
-            using var ping = await _http.GetAsync(_url, ct);
-            ping.EnsureSuccessStatusCode();
             await PostAsync(KuandoProtocol.Register(KuandoProtocol.PresenceSource, _settings.EventStyles), ct);
             await PostAsync(KuandoProtocol.Register(KuandoProtocol.CallSource, _settings.EventStyles), ct);
             await PostAsync(KuandoProtocol.InitialPriority(KuandoProtocol.PresenceSource), ct);
@@ -58,14 +56,16 @@ internal sealed class KuandoHub
 
     public async Task SendPresenceAsync(string eventName, CancellationToken ct)
     {
-        await PostAsync(KuandoProtocol.Signal(KuandoProtocol.PresenceSource,
-            eventName, _settings.EventStyles[eventName]), ct);
+        try { await PostAsync(KuandoProtocol.Signal(KuandoProtocol.PresenceSource,
+            eventName, _settings.EventStyles[eventName]), ct); }
+        catch { _registered = false; throw; }
     }
 
     public async Task SendCallAsync(string eventName, CancellationToken ct)
     {
-        await PostAsync(eventName == "Idle" ? KuandoProtocol.OffCall() :
-            KuandoProtocol.Signal(KuandoProtocol.CallSource, eventName, _settings.EventStyles[eventName]), ct);
+        try { await PostAsync(eventName == "Idle" ? KuandoProtocol.OffCall() :
+            KuandoProtocol.Signal(KuandoProtocol.CallSource, eventName, _settings.EventStyles[eventName]), ct); }
+        catch { _registered = false; throw; }
     }
 
     private async Task PostAsync(string json, CancellationToken ct)

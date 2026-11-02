@@ -9,6 +9,7 @@ internal sealed class TrayContext : ApplicationContext
     private readonly NotifyIcon _tray;
     private readonly ToolStripMenuItem _statusItem;
     private readonly CancellationTokenSource _lifetime = new();
+    private readonly System.Windows.Forms.Timer _displayTimer = new() { Interval = 500 };
     private CancellationTokenSource? _monitorCancel;
     private Task? _monitorTask;
     private AppSettings _settings = new();
@@ -35,6 +36,8 @@ internal sealed class TrayContext : ApplicationContext
             ContextMenuStrip = menu
         };
         _tray.DoubleClick += (_, _) => OpenSettings();
+        _displayTimer.Tick += (_, _) => UpdateStatus();
+        _displayTimer.Start();
         try { _settings = _store.Load(); }
         catch (Exception e) { ShowError("Einstellungen konnten nicht gelesen werden: " + e.Message); }
         if (string.IsNullOrWhiteSpace(_settings.PbxUrl) || !_store.HasSecret)
@@ -83,9 +86,10 @@ internal sealed class TrayContext : ApplicationContext
         if (!_store.HasSecret) { ShowError("Keine Zugangsdaten gespeichert."); return; }
         try { _settings.Validate(); }
         catch (Exception e) { ShowError(e.Message); return; }
-        _monitorCancel = CancellationTokenSource.CreateLinkedTokenSource(_lifetime.Token);
+        var cancel = CancellationTokenSource.CreateLinkedTokenSource(_lifetime.Token);
+        _monitorCancel = cancel;
         var settingsSnapshot = _store.Load();
-        _monitorTask = Task.Run(() => MonitorAsync(settingsSnapshot, _monitorCancel.Token));
+        _monitorTask = Task.Run(() => MonitorAsync(settingsSnapshot, cancel.Token));
     }
 
     private async Task MonitorAsync(AppSettings settings, CancellationToken ct)
@@ -134,13 +138,15 @@ internal sealed class TrayContext : ApplicationContext
                     _lastPresence = lastPresenceValue;
                     _lastCall = lastCallValue;
                     _lastError = "";
-                    SafeUi(UpdateStatus);
+
+                    // Tray UI is refreshed by a WinForms timer on its own UI thread.
                 }
                 catch (OperationCanceledException) when (ct.IsCancellationRequested) { break; }
                 catch (Exception e)
                 {
                     _lastError = e.Message;
-                    SafeUi(UpdateStatus);
+
+                    // Tray UI is refreshed by a WinForms timer on its own UI thread.
                     // Do not change kuando lights when 3CX is unreachable.
                 }
                 await Task.Delay(TimeSpan.FromSeconds(settings.PollSeconds), ct);
@@ -150,28 +156,12 @@ internal sealed class TrayContext : ApplicationContext
         finally { try { await wsTask.WaitAsync(TimeSpan.FromSeconds(2)); } catch { } }
     }
 
-    private void SafeUi(Action action)
-    {
-        try
-        {
-            if (!_tray.Visible) return;
-            if (Application.OpenForms.Count > 0)
-            {
-                var form = Application.OpenForms[0];
-                if (form.IsHandleCreated) form.BeginInvoke(action);
-            }
-            // A NotifyIcon-only application has no Form; use the WinForms sync context.
-            else _uiContext?.Post(_ => action(), null);
-        }
-        catch { }
-    }
-
-    private readonly SynchronizationContext? _uiContext = SynchronizationContext.Current;
-
     protected override void ExitThreadCore()
     {
         _lifetime.Cancel();
         _monitorCancel?.Cancel();
+        _displayTimer.Stop();
+        _displayTimer.Dispose();
         _tray.Visible = false;
         _tray.Dispose();
         base.ExitThreadCore();

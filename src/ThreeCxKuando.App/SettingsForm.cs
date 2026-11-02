@@ -37,7 +37,7 @@ internal sealed class SettingsForm : Form
             ColumnCount = 2,
             AutoScroll = true,
             Padding = new Padding(15),
-            RowCount = 9
+            RowCount = 0
         };
         layout.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 175));
         layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
