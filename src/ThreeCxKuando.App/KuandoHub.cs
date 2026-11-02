@@ -32,17 +32,18 @@ internal sealed class KuandoHub
     public async Task<bool> EnsureRegisteredAsync(CancellationToken ct)
     {
         if (_url is null) return false;
-        if (_registered) return true;
+        if (_registered && DateTimeOffset.UtcNow - _lastCheck < TimeSpan.FromSeconds(60)) return true;
         try
         {
             await PostAsync(KuandoProtocol.Register(KuandoProtocol.PresenceSource, _settings.EventStyles), ct);
             await PostAsync(KuandoProtocol.Register(KuandoProtocol.CallSource, _settings.EventStyles), ct);
             await PostAsync(KuandoProtocol.InitialPriority(KuandoProtocol.PresenceSource), ct);
             await PostAsync(KuandoProtocol.InitialPriority(KuandoProtocol.CallSource), ct);
-            bool newConnection = !_registered;
             _registered = true;
             _lastCheck = DateTimeOffset.UtcNow;
-            if (newConnection) RegistrationRecovered?.Invoke();
+            // Reapply the last known states after a periodic re-registration: kuandoHUB
+            // might have restarted without an intervening status event.
+            RegistrationRecovered?.Invoke();
             return true;
         }
         catch
