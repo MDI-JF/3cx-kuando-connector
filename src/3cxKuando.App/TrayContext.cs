@@ -108,10 +108,8 @@ internal sealed class TrayContext : ApplicationContext
     private async Task MonitorAsync(AppSettings settings, CancellationToken ct)
     {
         using var threeHttp = new HttpClient { Timeout = TimeSpan.FromSeconds(15) };
-        using var hubHttp = new HttpClient { Timeout = TimeSpan.FromSeconds(5) };
         using var api = new PbxApiClient(threeHttp, settings, _store.LoadSecret());
-        var terminalSession = SystemInformation.TerminalServerSession;
-        var hub = new KuandoHub(hubHttp, settings, terminalSession);
+        using var hub = new KuandoHub(settings);
         var dedup = new EventDeduplicator();
         var callEvents = new CallEventState();
         hub.RegistrationRecovered += () =>
@@ -189,12 +187,12 @@ internal sealed class TrayContext : ApplicationContext
                     {
                         // Failed presence requests must not block call signaling.
                         if (presenceValue is not null &&
-                            dedup.ShouldSend(KuandoProtocol.Source, KuandoProtocol.PresenceEventType, presenceValue))
+                            dedup.ShouldSend(HubEvents.Source, HubEvents.Presence, presenceValue))
                         {
                             try
                             {
                                 await hub.SendPresenceAsync(presenceValue, ct);
-                                dedup.MarkSent(KuandoProtocol.Source, KuandoProtocol.PresenceEventType, presenceValue);
+                                dedup.MarkSent(HubEvents.Source, HubEvents.Presence, presenceValue);
                             }
                             catch (OperationCanceledException) when (ct.IsCancellationRequested) { break; }
                             catch (Exception ex)
@@ -218,7 +216,7 @@ internal sealed class TrayContext : ApplicationContext
                             }
                         }
                     }
-                    else problems.Add("kuandoHUB unreachable: " + hub.EndpointLabel);
+                    else problems.Add("kuandoHUB SDK disconnected: " + hub.ConnectionLabel);
                 }
                 catch (OperationCanceledException) when (ct.IsCancellationRequested) { break; }
                 catch (Exception ex) { problems.Add("kuandoHUB: " + DiagnosticLog.SafeError(ex)); }
