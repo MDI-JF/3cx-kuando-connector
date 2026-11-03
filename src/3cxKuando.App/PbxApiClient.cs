@@ -110,7 +110,7 @@ internal sealed class PbxApiClient : IDisposable
                 changed();
                 var buffer = new byte[8192];
                 using var message = new MemoryStream();
-                long? lastSequence = null;
+                var detector = new CallChangeDetector(_settings.Extension);
                 while (!ct.IsCancellationRequested && socket.State == WebSocketState.Open)
                 {
                     var frame = await socket.ReceiveAsync(new ArraySegment<byte>(buffer), ct);
@@ -121,23 +121,8 @@ internal sealed class PbxApiClient : IDisposable
                     if (!frame.EndOfMessage) continue;
                     using var packet = JsonDocument.Parse(message.ToArray());
                     message.SetLength(0);
-                    var root = packet.RootElement;
-                    if (root.TryGetProperty("sequence", out var seq))
-                    {
-                        long current = seq.GetInt64();
-                        if (lastSequence.HasValue && current != lastSequence.Value + 1) changed();
-                        lastSequence = current;
-                    }
-                    if (root.TryGetProperty("event", out var evt) &&
-                        evt.TryGetProperty("event_type", out var kind) &&
-                        kind.GetInt32() is 0 or 1 &&
-                        evt.TryGetProperty("entity", out var path))
-                    {
-                        string entity = path.GetString() ?? "";
-                        string prefix = "/callcontrol/" + _settings.Extension;
-                        if (entity == "/callcontrol" || entity == prefix ||
-                            entity.StartsWith(prefix + "/", StringComparison.Ordinal)) changed();
-                    }
+                    if (detector.ShouldRefresh(packet.RootElement))
+                        changed();
                 }
             }
             catch (OperationCanceledException) when (ct.IsCancellationRequested) { break; }
