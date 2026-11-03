@@ -10,7 +10,7 @@ internal interface IHubSdk : IDisposable
     void RegisterDataSource(BusylightHubDataSourceParameter definition);
     void CreateInitialPriority(BusylightHubPriorityParameter priority);
     void Send(string eventType, string eventName, LightStyle style);
-    void EndAlert();
+    void EndEvent(string eventType, string eventName);
 }
 
 /// <summary>
@@ -22,6 +22,7 @@ internal interface IPlenomRuntime
     bool IsHubConnected { get; }
     string ActualEventType { set; }
     string ActualEventName { set; }
+    bool AutomaticEndEventMode { set; }
     string LightEventType { set; }
     string BlinkEventType { set; }
     string PulseEventType { set; }
@@ -43,9 +44,17 @@ internal sealed class PlenomRuntime : IPlenomRuntime
 {
     private readonly KuandoSDK _sdk = new(slavemode: true, mydatasourcename: HubEvents.Source);
 
+    public PlenomRuntime()
+    {
+        // Automatic ending is global, not scoped to the Presence/Alert channel.
+        // Individual events are ended explicitly to retain independent priorities.
+        _sdk.AutomaticEndEventMode = false;
+    }
+
     public bool IsHubConnected => _sdk.IsHubConnected;
     public string ActualEventType { set => _sdk.ActualEventType = value; }
     public string ActualEventName { set => _sdk.ActualEventName = value; }
+    public bool AutomaticEndEventMode { set => _sdk.AutomaticEndEventMode = value; }
     public string LightEventType { set => _sdk.LightEventType = value; }
     public string BlinkEventType { set => _sdk.BlinkEventType = value; }
     public string PulseEventType { set => _sdk.PulseEventType = value; }
@@ -123,12 +132,13 @@ internal sealed class PlenomHubSdk : IHubSdk
         }
     }
 
-    public void EndAlert()
+    public void EndEvent(string eventType, string eventName)
     {
         ThrowIfDisposed();
-        _sdk.ActualEventType = HubEvents.Alert;
-        _sdk.ActualEventName = "Off";
-        _sdk.EndEvent(HubEvents.Alert, "Off");
+        if (eventType is not (HubEvents.Presence or HubEvents.Alert) ||
+            string.IsNullOrWhiteSpace(eventName))
+            throw new ArgumentException("Invalid event to end.");
+        _sdk.EndEvent(eventType, eventName);
     }
 
     private void ThrowIfDisposed()
