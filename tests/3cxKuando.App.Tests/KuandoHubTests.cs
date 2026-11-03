@@ -230,7 +230,7 @@ public sealed class KuandoHubTests
         Assert.Equal(new[]
         {
             "Presence Available", "Alert Ringing", "Presence Away",
-            "Alert Connected", "End Alert Ringing", "End Alert Connected"
+            "End Alert Ringing", "Alert Connected", "End Alert Connected"
         }, sdk.Calls);
     }
 
@@ -275,9 +275,58 @@ public sealed class KuandoHubTests
         sdk.FailEnd = true;
         await Assert.ThrowsAsync<InvalidOperationException>(
             () => hub.SendCallAsync("Connected", CancellationToken.None));
-        Assert.Empty(sdk.Ended);
+        Assert.Equal((HubEvents.Alert, "Ringing"), Assert.Single(sdk.Ended));
+        Assert.DoesNotContain(sdk.Effects, e => e.Name == "Connected");
         await hub.SendCallAsync("Connected", CancellationToken.None);
         Assert.Equal((HubEvents.Alert, "Ringing"), Assert.Single(sdk.Ended));
+        await hub.SendCallAsync("Idle", CancellationToken.None);
+        Assert.Equal((HubEvents.Alert, "Connected"), sdk.Ended[^1]);
+    }
+
+    [Fact]
+    public async Task ReplacementAlertMustBeLastSdkOperationDuringActiveCall()
+    {
+        var sdk = new RecordingSdk();
+        using var hub = Create(sdk);
+        await hub.SendPresenceAsync("Available", CancellationToken.None);
+        await hub.SendCallAsync("Dialing", CancellationToken.None);
+        await hub.SendCallAsync("Connected", CancellationToken.None);
+        Assert.Equal("Alert Connected", sdk.Calls[^1]);
+        Assert.Equal(new[]
+        {
+            "Presence Available", "Alert Dialing",
+            "End Alert Dialing", "Alert Connected"
+        }, sdk.Calls);
+        Assert.DoesNotContain(sdk.Ended, e => e.Type == HubEvents.Presence);
+
+        await hub.SendCallAsync("Hold", CancellationToken.None);
+        Assert.Equal(new[]
+        {
+            "End Alert Connected", "Alert Hold"
+        }, sdk.Calls.TakeLast(2));
+        await hub.SendCallAsync("Connected", CancellationToken.None);
+        Assert.Equal(new[]
+        {
+            "End Alert Hold", "Alert Connected"
+        }, sdk.Calls.TakeLast(2));
+
+        await hub.SendCallAsync("Idle", CancellationToken.None);
+        Assert.Equal("End Alert Connected", sdk.Calls[^1]);
+    }
+
+    [Fact]
+    public async Task FailedReplacementSendIsRetriedWithoutReEndingOldAlert()
+    {
+        var sdk = new RecordingSdk();
+        using var hub = Create(sdk);
+        await hub.SendCallAsync("Ringing", CancellationToken.None);
+        sdk.FailNextEffect = true;
+        await Assert.ThrowsAsync<InvalidOperationException>(
+            () => hub.SendCallAsync("Connected", CancellationToken.None));
+        Assert.Equal((HubEvents.Alert, "Ringing"), Assert.Single(sdk.Ended));
+        await hub.SendCallAsync("Connected", CancellationToken.None);
+        Assert.Single(sdk.Ended);
+        Assert.Equal("Alert Connected", sdk.Calls[^1]);
         await hub.SendCallAsync("Idle", CancellationToken.None);
         Assert.Equal((HubEvents.Alert, "Connected"), sdk.Ended[^1]);
     }
