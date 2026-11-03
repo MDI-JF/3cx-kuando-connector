@@ -6,8 +6,6 @@ using KuandoConnector.Core;
 
 namespace KuandoConnector.App;
 
-internal sealed record PresenceResult(string Profile, bool? Registered, string Name);
-
 internal sealed class PbxApiClient : IDisposable
 {
     private readonly HttpClient _http;
@@ -16,10 +14,6 @@ internal sealed class PbxApiClient : IDisposable
     private readonly SemaphoreSlim _lock = new(1, 1);
     private string? _token;
     private DateTimeOffset _renewAt = DateTimeOffset.MinValue;
-    private volatile bool _websocketConnected;
-
-    public bool IsWebSocketConnected => _websocketConnected;
-
     public PbxApiClient(HttpClient http, AppSettings settings, string secret)
     {
         _http = http;
@@ -69,21 +63,18 @@ internal sealed class PbxApiClient : IDisposable
         return JsonDocument.Parse(await response.Content.ReadAsStringAsync(ct));
     }
 
-    public async Task<PresenceResult> GetPresenceAsync(CancellationToken ct)
+    public async Task<string> GetPresenceAsync(CancellationToken ct)
     {
         string escaped = _settings.Extension.Replace("'", "''");
         string filter = Uri.EscapeDataString($"Number eq '{escaped}'");
         using var json = await GetAsync(
-            $"/xapi/v1/Users?$filter={filter}&$select=Number,DisplayName,CurrentProfileName,IsRegistered&$top=1", ct);
+            $"/xapi/v1/Users?$filter={filter}&$select=Number,CurrentProfileName&$top=1", ct);
         var users = json.RootElement.GetProperty("value");
         if (users.GetArrayLength() != 1)
             throw new InvalidOperationException("3CX XAPI: extension was not found or could not be read.");
         var user = users[0];
-        string profile = user.TryGetProperty("CurrentProfileName", out var p) ? p.GetString() ?? "" : "";
-        string name = user.TryGetProperty("DisplayName", out var n) ? n.GetString() ?? _settings.Extension : _settings.Extension;
-        bool? registered = user.TryGetProperty("IsRegistered", out var r) && r.ValueKind is JsonValueKind.True or JsonValueKind.False
-            ? r.GetBoolean() : null;
-        return new PresenceResult(profile, registered, name);
+        return user.TryGetProperty("CurrentProfileName", out var profile) && profile.ValueKind == JsonValueKind.String
+            ? profile.GetString() ?? "" : "";
     }
 
     public async Task<string> GetCallStateAsync(CancellationToken ct)
@@ -109,7 +100,6 @@ internal sealed class PbxApiClient : IDisposable
                 socket.Options.KeepAliveInterval = TimeSpan.FromSeconds(20);
                 var wsUrl = BaseUrl.Replace("https://", "wss://", StringComparison.OrdinalIgnoreCase) + "/callcontrol/ws";
                 await socket.ConnectAsync(new Uri(wsUrl), ct);
-                _websocketConnected = true;
                 changed();
                 var buffer = new byte[8192];
                 using var message = new MemoryStream();
@@ -145,7 +135,6 @@ internal sealed class PbxApiClient : IDisposable
             }
             catch (OperationCanceledException) when (ct.IsCancellationRequested) { break; }
             catch { /* Retry after a short pause; REST polling remains available. */ }
-            finally { _websocketConnected = false; }
             try { await Task.Delay(TimeSpan.FromSeconds(20), ct); }
             catch (OperationCanceledException) { break; }
         }
