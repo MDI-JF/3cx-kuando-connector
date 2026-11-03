@@ -10,10 +10,8 @@ internal sealed class TrayContext : ApplicationContext
     private readonly ToolStripMenuItem _statusItem;
     private readonly CancellationTokenSource _lifetime = new();
     private readonly System.Windows.Forms.Timer _displayTimer = new() { Interval = 500 };
-    private CancellationTokenSource? _monitorCancel;
-    private Task? _monitorTask;
+    private readonly MonitorCoordinator _monitor;
     private AppSettings _settings = new();
-    private readonly SemaphoreSlim _monitorGate = new(1, 1);
     private bool _exiting;
     private bool _editing;
     private string _lastPresence = "unknown";
@@ -24,6 +22,7 @@ internal sealed class TrayContext : ApplicationContext
 
     public TrayContext()
     {
+        _monitor = new MonitorCoordinator(_lifetime.Token);
         var menu = new ContextMenuStrip();
         _statusItem = new ToolStripMenuItem("Connecting...") { Enabled = false };
         menu.Items.Add(_statusItem);
@@ -105,47 +104,27 @@ internal sealed class TrayContext : ApplicationContext
     {
         try
         {
-            await _monitorGate.WaitAsync(_lifetime.Token);
-            try
+            if (_lifetime.IsCancellationRequested) return;
+            if (!_store.HasSecret)
             {
-                if (_lifetime.IsCancellationRequested) return;
-                _monitorCancel?.Cancel();
-                if (_monitorTask is not null)
-                {
-                    try { await _monitorTask; }
-                    catch (OperationCanceledException) { }
-                    catch (Exception ex)
-                    {
-                        DiagnosticLog.Write("Previous monitor stopped with error", DiagnosticLog.SafeError(ex));
-                    }
-                }
-                _monitorCancel?.Dispose();
-                _monitorCancel = null;
-                _monitorTask = null;
-                if (_lifetime.IsCancellationRequested) return;
-                if (!_store.HasSecret)
-                {
-                    ShowError("No API credentials have been saved.");
-                    return;
-                }
-
-                var settingsSnapshot = _store.Load();
-                settingsSnapshot.Validate();
-                var cancel = CancellationTokenSource.CreateLinkedTokenSource(_lifetime.Token);
-                _monitorCancel = cancel;
-                _monitorTask = Task.Run(async () =>
-                {
-                    try { await MonitorAsync(settingsSnapshot, cancel.Token); }
-                    catch (OperationCanceledException) when (cancel.IsCancellationRequested) { }
-                    catch (Exception ex)
-                    {
-                        DiagnosticLog.Write("Monitor failed", DiagnosticLog.SafeError(ex));
-                        _lastError = "Monitor: " + DiagnosticLog.SafeError(ex);
-                    }
-                });
-                _lastError = "";
+                ShowError("No API credentials have been saved.");
+                return;
             }
-            finally { _monitorGate.Release(); }
+
+            var snapshot = _store.Load();
+            snapshot.Validate();
+            await _monitor.RestartAsync(async ct =>
+            {
+                try { await MonitorAsync(snapshot, ct); }
+                catch (OperationCanceledException) when (ct.IsCancellationRequested) { }
+                catch (Exception ex)
+                {
+                    DiagnosticLog.Write("Monitor failed", DiagnosticLog.SafeError(ex));
+                    _lastError = "Monitor: " + DiagnosticLog.SafeError(ex);
+                }
+            });
+            if (!_lifetime.IsCancellationRequested)
+                _lastError = "";
         }
         catch (OperationCanceledException) when (_lifetime.IsCancellationRequested) { }
         catch (Exception ex) { ShowError("Monitor start failed: " + DiagnosticLog.SafeError(ex)); }
@@ -299,33 +278,14 @@ internal sealed class TrayContext : ApplicationContext
         _exiting = true;
         DiagnosticLog.Write("Connector", "Stopping");
         _lifetime.Cancel();
-        _monitorCancel?.Cancel();
         _displayTimer.Stop();
-        try
-        {
-            await _monitorGate.WaitAsync();
-            try
-            {
-                if (_monitorTask is not null)
-                {
-                    try { await _monitorTask; }
-                    catch (Exception ex)
-                    {
-                        DiagnosticLog.Write("Shutdown", DiagnosticLog.SafeError(ex));
-                    }
-                }
-                _monitorCancel?.Dispose();
-                _monitorCancel = null;
-                _monitorTask = null;
-            }
-            finally { _monitorGate.Release(); }
-        }
+        try { await _monitor.StopAsync(); }
         finally
         {
+            _monitor.Dispose();
             _displayTimer.Dispose();
             _tray.Visible = false;
             _tray.Dispose();
-            _monitorGate.Dispose();
             _lifetime.Dispose();
             DiagnosticLog.Write("Connector", "Stopped");
             base.ExitThreadCore();
