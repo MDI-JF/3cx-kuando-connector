@@ -34,10 +34,14 @@ internal interface IPlenomRuntime
     void Terminate();
 }
 
-/// <summary>Official Plenom SDK in kuandoHUB mode; never uses direct USB APIs.</summary>
+/// <summary>
+/// Plenom SDK adapter. Slave mode suppresses SDK-initiated light changes on
+/// initialization and termination; it does not disable standalone fallback.
+/// Callers must check IsHubConnected before sending an effect.
+/// </summary>
 internal sealed class PlenomRuntime : IPlenomRuntime
 {
-    private readonly KuandoSDK _sdk = new(HubEvents.Source);
+    private readonly KuandoSDK _sdk = new(slavemode: true, mydatasourcename: HubEvents.Source);
 
     public bool IsHubConnected => _sdk.IsHubConnected;
     public string ActualEventType { set => _sdk.ActualEventType = value; }
