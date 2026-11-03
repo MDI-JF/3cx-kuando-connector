@@ -26,6 +26,15 @@ public class StatusTests
     }
 
     [Fact]
+    public void UnknownCallStatusesAreNotMisclassifiedAsIdle()
+    {
+        Assert.Throws<InvalidOperationException>(() =>
+            StatusLogic.SelectCallState(new[] { "Unrecognized" }));
+        Assert.Equal("Idle", StatusLogic.SelectCallState(Array.Empty<string>()));
+        Assert.Equal("Connected", StatusLogic.SelectCallState(new[] { "Connected", "Unrecognized" }));
+    }
+
+    [Fact]
     public void OnlyDeduplicatesConfirmedEvents()
     {
         var dedup = new EventDeduplicator();
@@ -172,7 +181,7 @@ public class StatusTests
     }
 
     [Fact]
-    public void FailedTransportInvalidatesRegistrationImmediately()
+    public void FailedSdkOperationInvalidatesRegistrationImmediately()
     {
         var clock = new TestClock();
         var registration = new RegistrationLease(clock);
