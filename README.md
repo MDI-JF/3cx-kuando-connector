@@ -12,7 +12,7 @@ The previously developed HTTP transport is archived separately in `legacy/http-t
 
 - One kuandoHUB data source, `3CX Connector`, with independently configurable `Presence` and `Alert` event-type priorities
 - Separate state channels keyed by `(sender, event type)` – an Alert event cannot overwrite Presence deduplication
-- Presence profiles from 3CX XAPI; call state from 3CX Call Control REST with WebSocket wake-ups
+- Presence profiles from 3CX XAPI; call state from 3CX Call Control REST with immediate WebSocket wake-ups and timed fallback polling
 - Automatic 3CX reconnect, OAuth token renewal, SDK re-registration and event replay
 - Per-Windows-user settings at `%APPDATA%\3cxKuando`; client secret protected using Windows DPAPI CurrentUser
 - Windows tray interface, per-user autostart, independent call and presence processing
@@ -21,7 +21,7 @@ The previously developed HTTP transport is archived separately in `legacy/http-t
 
 - Windows 10/11 or supported Windows Server user session (x64)
 - .NET 10 SDK for building; published installer provides a self-contained runtime
-- 3CX v20 service principal with Configuration API permission to read the target extension's `CurrentProfileName` and `IsRegistered`
+- 3CX v20 service principal with Configuration API permission to read the target extension's `CurrentProfileName`
 - Call Control permission with the target extension assigned
 - An installed, running, SDK-compatible kuandoHUB in **the same Windows user session** as the tray connector
 - Plenom SDK through NuGet (restored at build time). No HTTP API, HTTP port, access token, URL override or manual listener setup is needed.
@@ -65,7 +65,9 @@ The default Hold/Held color is yellow on the 0–100 RGB scale (`100, 100, 0`). 
 
 **Light** is steady illumination. **Blink** alternates between illuminated and off phases; by default the SDK receives values `5, 5` for on/off timing. **Pulse** gradually changes intensity using a seven-step sequence (3, 21, 36, 50, 36, 21, 10). Effect colors are specified on the same 0–100 scale as the existing configuration.
 
-When a call completes, the application uses the SDK's `EndEvent` for the `Alert` event type, without clearing `Presence`. `Off` is **not** a selectable call state or registered event name. No artificial Off is emitted at startup or on a failed 3CX read. Active calls are replayed after successful hub re-registration; a successfully ended call is not replayed.
+When a call completes, the application uses the SDK's `EndEvent("Alert", previousEventName)` for the last active event (such as `Connected`), without clearing `Presence`. When an event changes within a channel, only the previous event in that same channel is ended. The SDK's global `AutomaticEndEventMode` is disabled to prevent call events from clearing presence events. `Off` is **not** a selectable call state or registered event name and is never sent as an event name. No artificial ending is emitted at startup or on a failed 3CX read. Active calls are replayed after successful hub re-registration; a successfully ended call is not replayed.
+
+Monitor restarts are serialized: the previous 3CX/WebSocket/SDK monitor must be stopped before a new SDK instance starts. Invalid or unknown Call Control responses are treated as errors (not as `Idle`), avoiding inadvertent call-priority removal.
 
 Important SDK behavior to field-check: the Plenom SDK identifies the event by type and name. Animation and priority handling must be checked with installed kuandoHUB, especially after reconnect and on multi-user hosts. The existence and signatures of the SDK methods have been verified, but real hardware behavior is not established by unit tests.
 
