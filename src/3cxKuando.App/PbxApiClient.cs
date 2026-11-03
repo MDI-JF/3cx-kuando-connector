@@ -49,18 +49,45 @@ internal sealed class PbxApiClient : IDisposable
         finally { _lock.Release(); }
     }
 
+    private async Task InvalidateIfCurrentAsync(string rejectedToken, CancellationToken ct)
+    {
+        // Other requests may have refreshed the shared token already.
+        await _lock.WaitAsync(ct);
+        try
+        {
+            if (_token == rejectedToken)
+                _renewAt = DateTimeOffset.MinValue;
+        }
+        finally { _lock.Release(); }
+    }
+
     private async Task<JsonDocument> GetAsync(string path, CancellationToken ct)
     {
-        using var request = new HttpRequestMessage(HttpMethod.Get, BaseUrl + path);
-        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", await TokenAsync(ct));
-        using var response = await _http.SendAsync(request, ct);
-        if (response.StatusCode == System.Net.HttpStatusCode.Unauthorized)
+        for (int attempt = 0; attempt < 2; attempt++)
         {
-            _renewAt = DateTimeOffset.MinValue;
-            throw new HttpRequestException("3CX hat das Token abgelehnt (401).", null, response.StatusCode);
+            string token = await TokenAsync(ct);
+            using var request = new HttpRequestMessage(HttpMethod.Get, BaseUrl + path);
+            request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
+            using var response = await _http.SendAsync(request, ct);
+            if (response.StatusCode == System.Net.HttpStatusCode.Unauthorized)
+            {
+                await InvalidateIfCurrentAsync(token, ct);
+                if (attempt == 0)
+                {
+                    var endpoint = path.StartsWith("/xapi/", StringComparison.Ordinal)
+                        ? "Presence" : "Call Control";
+                    DiagnosticLog.Write("3CX OAuth", endpoint + ": HTTP 401, refreshing token and retrying once");
+                    continue;
+                }
+                throw new HttpRequestException(
+                    "3CX hat das Token auch nach einer erneuten Anmeldung abgelehnt (401).",
+                    null, response.StatusCode);
+            }
+            // 403 remains an ordinary authorization error: no retry or refresh.
+            response.EnsureSuccessStatusCode();
+            return JsonDocument.Parse(await response.Content.ReadAsStringAsync(ct));
         }
-        response.EnsureSuccessStatusCode();
-        return JsonDocument.Parse(await response.Content.ReadAsStringAsync(ct));
+        throw new InvalidOperationException("Unexpected 3CX retry state.");
     }
 
     public async Task<string> GetPresenceAsync(CancellationToken ct)
