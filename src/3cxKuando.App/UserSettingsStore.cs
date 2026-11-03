@@ -8,9 +8,17 @@ namespace KuandoConnector.App;
 
 internal sealed class UserSettingsStore
 {
-    private static readonly string Root = Environment.GetFolderPath(
-        Environment.SpecialFolder.ApplicationData);
-    private readonly string _dir = Path.Combine(Root, "3cxKuando");
+    private readonly string _dir;
+    private readonly Action<bool> _configureAutostart;
+
+    // Injection is limited to local file/registry effects so behavior can be
+    // tested without modifying the CI runner's real user profile or startup.
+    internal UserSettingsStore(string? directory = null, Action<bool>? configureAutostart = null)
+    {
+        _dir = directory ?? Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "3cxKuando");
+        _configureAutostart = configureAutostart ?? ConfigureAutostart;
+    }
 
     private string SettingsPath => Path.Combine(_dir, "settings.json");
     private string SecretPath => Path.Combine(_dir, "secret.dat");
@@ -34,6 +42,8 @@ internal sealed class UserSettingsStore
     public void Save(AppSettings settings, string? newSecret)
     {
         settings.Validate();
+        if (!HasSecret && string.IsNullOrEmpty(newSecret))
+            throw new InvalidOperationException("A 3CX API secret is required.");
         Directory.CreateDirectory(_dir);
         // Never put credentials, access tokens or other sensitive values in settings.json.
         var json = JsonSerializer.Serialize(settings, new JsonSerializerOptions { WriteIndented = true });
@@ -46,11 +56,10 @@ internal sealed class UserSettingsStore
             try { File.WriteAllBytes(SecretPath, ProtectedData.Protect(plain, null, DataProtectionScope.CurrentUser)); }
             finally { CryptographicOperations.ZeroMemory(plain); }
         }
-        if (!HasSecret) throw new InvalidOperationException("A 3CX API secret is required.");
-        ConfigureAutostart(settings.StartAtLogin);
+        _configureAutostart(settings.StartAtLogin);
     }
 
-    public void RefreshAutostart(bool enabled) => ConfigureAutostart(enabled);
+    public void RefreshAutostart(bool enabled) => _configureAutostart(enabled);
 
     private static void ConfigureAutostart(bool enabled)
     {
