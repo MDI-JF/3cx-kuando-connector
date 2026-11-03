@@ -222,7 +222,6 @@ public sealed class KuandoHubTests
         await hub.SendCallAsync("Connected", CancellationToken.None);
         Assert.Equal(new[]
         {
-            (HubEvents.Presence, "Available"),
             (HubEvents.Alert, "Ringing")
         }, sdk.Ended);
         await hub.SendCallAsync("Idle", CancellationToken.None);
@@ -231,9 +230,40 @@ public sealed class KuandoHubTests
         Assert.Equal(new[]
         {
             "Presence Available", "Alert Ringing", "Presence Away",
-            "End Presence Available", "Alert Connected", "End Alert Ringing",
-            "End Alert Connected"
+            "Alert Connected", "End Alert Ringing", "End Alert Connected"
         }, sdk.Calls);
+    }
+
+    [Fact]
+    public async Task PresenceNeverEndsAcrossMultipleChangesAndAlertRelease()
+    {
+        var sdk = new RecordingSdk();
+        using var hub = Create(sdk);
+        await hub.SendPresenceAsync("Available", CancellationToken.None);
+        await hub.SendPresenceAsync("Away", CancellationToken.None);
+        await hub.SendPresenceAsync("OutOfOffice", CancellationToken.None);
+        await hub.SendCallAsync("Connected", CancellationToken.None);
+        await hub.SendCallAsync("Idle", CancellationToken.None);
+
+        Assert.Equal(new[] { "Available", "Away", "OutOfOffice" },
+            sdk.Effects.Where(e => e.Type == HubEvents.Presence).Select(e => e.Name));
+        Assert.Equal(new[] { (HubEvents.Alert, "Connected") }, sdk.Ended);
+        Assert.DoesNotContain(sdk.Calls, call => call.StartsWith("End Presence ", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task ReRegistrationDoesNotEndCurrentPresence()
+    {
+        var sdk = new RecordingSdk();
+        var clock = new Clock();
+        using var hub = Create(sdk, new RegistrationLease(clock));
+        Assert.True(await hub.EnsureRegisteredAsync(CancellationToken.None));
+        await hub.SendPresenceAsync("Away", CancellationToken.None);
+        clock.Now += TimeSpan.FromMinutes(15);
+        Assert.True(await hub.EnsureRegisteredAsync(CancellationToken.None));
+        await hub.SendPresenceAsync("Away", CancellationToken.None);
+        Assert.Empty(sdk.Ended);
+        Assert.Equal(2, sdk.Effects.Count(e => e.Type == HubEvents.Presence));
     }
 
     [Fact]
