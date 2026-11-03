@@ -54,20 +54,64 @@ public sealed class PbxApiClientTests
     }
 
     [Fact]
-    public async Task UnauthorizedApiResponseCausesTokenRefreshOnNextRequest()
+    public async Task UnauthorizedApiResponseRefreshesTokenAndRetriesImmediately()
     {
-        int calls = 0;
+        int tokenCalls = 0;
+        int presenceCalls = 0;
         var handler = new FakeHandler(req =>
         {
-            if (req.RequestUri!.AbsolutePath == "/connect/token") { calls++; return Token(); }
-            return calls == 1 ? Json("{}", HttpStatusCode.Unauthorized) :
+            if (req.RequestUri!.AbsolutePath == "/connect/token")
+                return Json("{\"access_token\":\"token-" + (++tokenCalls) + "\",\"expires_in\":3600}");
+            presenceCalls++;
+            return presenceCalls == 1 ? Json("{}", HttpStatusCode.Unauthorized) :
                 Json("{\"value\":[{\"CurrentProfileName\":\"Away\"}]}");
         });
         using var http = new HttpClient(handler);
         using var api = new PbxApiClient(http, Settings(), "secret");
-        await Assert.ThrowsAsync<HttpRequestException>(() => api.GetPresenceAsync(CancellationToken.None));
         Assert.Equal("Away", await api.GetPresenceAsync(CancellationToken.None));
-        Assert.Equal(2, calls);
+        Assert.Equal(2, tokenCalls);
+        Assert.Equal(2, presenceCalls);
+        Assert.Equal(new string?[] { null, "token-1", null, "token-2" }, handler.Tokens);
+    }
+
+    [Fact]
+    public async Task RepeatedUnauthorizedReturns401AfterExactlyOneRetry()
+    {
+        int tokenCalls = 0;
+        int getCalls = 0;
+        var handler = new FakeHandler(req =>
+        {
+            if (req.RequestUri!.AbsolutePath == "/connect/token") { tokenCalls++; return Token(); }
+            getCalls++;
+            return Json("{}", HttpStatusCode.Unauthorized);
+        });
+        using var http = new HttpClient(handler);
+        using var api = new PbxApiClient(http, Settings(), "secret");
+        var error = await Assert.ThrowsAsync<HttpRequestException>(
+            () => api.GetPresenceAsync(CancellationToken.None));
+        Assert.Equal(HttpStatusCode.Unauthorized, error.StatusCode);
+        Assert.Equal(2, getCalls);
+        Assert.Equal(2, tokenCalls);
+    }
+
+    [Fact]
+    public async Task ForbiddenIsNotRetriedAndDoesNotRefreshToken()
+    {
+        int tokenCalls = 0;
+        int getCalls = 0;
+        var handler = new FakeHandler(req =>
+        {
+            if (req.RequestUri!.AbsolutePath == "/connect/token") { tokenCalls++; return Token(); }
+            getCalls++;
+            return Json("{}", HttpStatusCode.Forbidden);
+        });
+        using var http = new HttpClient(handler);
+        using var api = new PbxApiClient(http, Settings(), "secret");
+        var error = await Assert.ThrowsAsync<HttpRequestException>(
+            () => api.GetCallStateAsync(CancellationToken.None));
+        Assert.Equal(HttpStatusCode.Forbidden, error.StatusCode);
+        Assert.Equal(1, getCalls);
+        Assert.Equal(1, tokenCalls);
     }
 
     [Theory]
