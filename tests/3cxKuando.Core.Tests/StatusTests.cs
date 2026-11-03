@@ -61,6 +61,51 @@ public class StatusTests
     }
 
     [Fact]
+    public void DefaultHeldCallColorsArePulsingYellow()
+    {
+        var styles = DefaultStyles.Create();
+        Assert.Equal(new LightStyle("Pulse", 100, 100, 0), styles["Hold"]);
+        Assert.Equal(new LightStyle("Pulse", 100, 100, 0), styles["Held"]);
+        Assert.Equal(new LightStyle("Light", 100, 0, 0), styles["Connected"]);
+    }
+
+    [Fact]
+    public void LegacyDefaultHoldAndHeldColorsMigrateWithoutChangingOtherStyles()
+    {
+        var previous = new AppSettings();
+        previous.EventStyles["Hold"] = new LightStyle("Pulse", 100, 0, 0);
+        previous.EventStyles["Held"] = new LightStyle("Pulse", 100, 0, 0);
+        previous.EventStyles["Connected"] = new LightStyle("Light", 100, 0, 0);
+        var json = System.Text.Json.JsonSerializer.Serialize(previous);
+        using var parsed = System.Text.Json.JsonDocument.Parse(json);
+        var legacy = new Dictionary<string, object?>();
+        foreach (var property in parsed.RootElement.EnumerateObject())
+            if (property.Name != nameof(AppSettings.SettingsSchemaVersion))
+                legacy[property.Name] = property.Value.Clone();
+        var migrated = AppSettings.FromJson(System.Text.Json.JsonSerializer.Serialize(legacy));
+        Assert.Equal(new LightStyle("Pulse", 100, 100, 0), migrated.EventStyles["Hold"]);
+        Assert.Equal(new LightStyle("Pulse", 100, 100, 0), migrated.EventStyles["Held"]);
+        Assert.Equal(new LightStyle("Light", 100, 0, 0), migrated.EventStyles["Connected"]);
+        Assert.Equal(2, migrated.SettingsSchemaVersion);
+    }
+
+    [Fact]
+    public void LegacyCustomHoldColorsRemainUntouched()
+    {
+        var old = new AppSettings();
+        old.EventStyles["Hold"] = new LightStyle("Pulse", 0, 40, 100);
+        old.EventStyles["Held"] = new LightStyle("Blink", 100, 0, 0);
+        var legacyJson = System.Text.Json.JsonSerializer.Serialize(old)
+            .Replace("\"SettingsSchemaVersion\":2,", "");
+        var migrated = AppSettings.FromJson(legacyJson);
+        Assert.Equal(new LightStyle("Pulse", 0, 40, 100), migrated.EventStyles["Hold"]);
+        Assert.Equal(new LightStyle("Blink", 100, 0, 0), migrated.EventStyles["Held"]);
+        var restored = AppSettings.FromJson(System.Text.Json.JsonSerializer.Serialize(migrated));
+        Assert.Equal(migrated.EventStyles["Hold"], restored.EventStyles["Hold"]);
+        Assert.Equal(migrated.EventStyles["Held"], restored.EventStyles["Held"]);
+    }
+
+    [Fact]
     public void RejectsNonHttpsAndInvalidSettings()
     {
         var settings = new AppSettings { PbxUrl = "http://example.com", ClientId = "id", Extension = "100" };
