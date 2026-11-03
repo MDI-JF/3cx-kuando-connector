@@ -103,7 +103,7 @@ public sealed class UserSettingsStoreTests : IDisposable
     {
         Directory.CreateDirectory(_dir);
         File.WriteAllText(Path.Combine(_dir, "settings.json"), "{invalid-json");
-        Assert.Throws<JsonException>(() => Store().Load());
+        Assert.ThrowsAny<JsonException>(() => Store().Load());
     }
 
     public void Dispose()
