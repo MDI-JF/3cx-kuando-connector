@@ -137,6 +137,7 @@ internal sealed class TrayContext : ApplicationContext
         using var hub = new KuandoHub(settings);
         var dedup = new EventDeduplicator();
         var callEvents = new CallEventState();
+        var apiHealth = new ApiHealthTracker(DiagnosticLog.Write);
         hub.RegistrationRecovered += () =>
         {
             dedup.Reset();
@@ -172,9 +173,10 @@ internal sealed class TrayContext : ApplicationContext
                     if (_lastPresence != presenceValue)
                         DiagnosticLog.Write("3CX Presence detected", presenceValue);
                     _lastPresence = presenceValue;
+                    apiHealth.Succeeded("Presence");
                 }
                 catch (OperationCanceledException) when (ct.IsCancellationRequested) { break; }
-                catch (Exception ex) { problems.Add("Presence: " + ex.Message); }
+                catch (Exception ex) { apiHealth.Failed("Presence", ex); }
 
                 try
                 {
@@ -183,6 +185,7 @@ internal sealed class TrayContext : ApplicationContext
                     {
                         lastCallValue = await api.GetCallStateAsync(ct);
                         lastCallFetch = DateTimeOffset.UtcNow;
+                        apiHealth.Succeeded("Call Control");
                     }
                     callValue = lastCallValue;
                     if (callValue is not null)
@@ -193,7 +196,7 @@ internal sealed class TrayContext : ApplicationContext
                     }
                 }
                 catch (OperationCanceledException) when (ct.IsCancellationRequested) { break; }
-                catch (Exception ex) { problems.Add("Call Control: " + ex.Message); }
+                catch (Exception ex) { apiHealth.Failed("Call Control", ex); }
 
                 // A completed call must not wait for a potentially timed-out
                 // registration refresh. A failed Off remains pending for retry.
@@ -253,9 +256,13 @@ internal sealed class TrayContext : ApplicationContext
                 catch (OperationCanceledException) when (ct.IsCancellationRequested) { break; }
                 catch (Exception ex) { problems.Add("kuandoHUB: " + DiagnosticLog.SafeError(ex)); }
 
-                _lastError = string.Join(" | ", problems);
-                var health = problems.Count == 0 ? "Connected" :
-                    string.Join(" | ", problems.Select(problem =>
+                // Error state is endpoint-specific: a skipped 5-second Call
+                // Control poll must not falsely clear its last 401/403 error.
+                // Only a successful request for that endpoint clears it.
+                var issues = apiHealth.ActiveErrors.Concat(problems).ToArray();
+                _lastError = string.Join(" | ", issues);
+                var health = issues.Length == 0 ? "Connected" :
+                    string.Join(" | ", issues.Select(problem =>
                         problem.StartsWith("kuandoHUB", StringComparison.Ordinal) ?
                         problem : problem.Split(':')[0]));
                 if (health != _lastDiagnosticHealth)
