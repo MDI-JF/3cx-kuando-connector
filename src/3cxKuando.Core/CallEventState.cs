@@ -3,7 +3,7 @@ namespace KuandoConnector.Core;
 /// <summary>
 /// Tracks the reported call event separately from the observed 3CX call state.
 /// A fresh Idle state should not activate a kuandoHUB priority with an Off event.
-/// After a successful active call event, Off is sent exactly once on real end.
+/// After a successful active call event, the matching hub event is ended once on real call end.
 /// </summary>
 public sealed class CallEventState
 {
