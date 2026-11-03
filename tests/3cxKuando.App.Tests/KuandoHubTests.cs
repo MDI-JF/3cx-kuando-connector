@@ -275,7 +275,7 @@ public sealed class KuandoHubTests
         sdk.FailEnd = true;
         await Assert.ThrowsAsync<InvalidOperationException>(
             () => hub.SendCallAsync("Connected", CancellationToken.None));
-        Assert.Equal((HubEvents.Alert, "Ringing"), Assert.Single(sdk.Ended));
+        Assert.Empty(sdk.Ended); // A failed EndEvent must not count as completed.
         Assert.DoesNotContain(sdk.Effects, e => e.Name == "Connected");
         await hub.SendCallAsync("Connected", CancellationToken.None);
         Assert.Equal((HubEvents.Alert, "Ringing"), Assert.Single(sdk.Ended));
