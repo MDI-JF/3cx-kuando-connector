@@ -12,7 +12,6 @@ public sealed class PlenomHubSdkTests
         public bool IsHubConnected { get; set; } = true;
         public string ActualEventType { get; set; } = "";
         public string ActualEventName { get; set; } = "";
-        public bool AutomaticEndEventMode { get; set; } = false;
         public string LightEventType { get; set; } = "";
         public string BlinkEventType { get; set; } = "";
         public string PulseEventType { get; set; } = "";
