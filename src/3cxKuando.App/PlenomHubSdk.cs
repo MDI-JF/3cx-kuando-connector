@@ -22,7 +22,6 @@ internal interface IPlenomRuntime
     bool IsHubConnected { get; }
     string ActualEventType { set; }
     string ActualEventName { set; }
-    bool AutomaticEndEventMode { set; }
     string LightEventType { set; }
     string BlinkEventType { set; }
     string PulseEventType { set; }
@@ -54,7 +53,6 @@ internal sealed class PlenomRuntime : IPlenomRuntime
     public bool IsHubConnected => _sdk.IsHubConnected;
     public string ActualEventType { set => _sdk.ActualEventType = value; }
     public string ActualEventName { set => _sdk.ActualEventName = value; }
-    public bool AutomaticEndEventMode { set => _sdk.AutomaticEndEventMode = value; }
     public string LightEventType { set => _sdk.LightEventType = value; }
     public string BlinkEventType { set => _sdk.BlinkEventType = value; }
     public string PulseEventType { set => _sdk.PulseEventType = value; }
