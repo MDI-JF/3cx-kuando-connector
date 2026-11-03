@@ -13,7 +13,8 @@ internal sealed class TrayContext : ApplicationContext
     private CancellationTokenSource? _monitorCancel;
     private Task? _monitorTask;
     private AppSettings _settings = new();
-    private int _changesRequested;
+    private readonly SemaphoreSlim _monitorGate = new(1, 1);
+    private bool _exiting;
     private bool _editing;
     private string _lastPresence = "unknown";
     private string _lastCall = "unknown";
@@ -28,7 +29,7 @@ internal sealed class TrayContext : ApplicationContext
         menu.Items.Add(_statusItem);
         menu.Items.Add(new ToolStripSeparator());
         menu.Items.Add("Settings...", null, (_, _) => OpenSettings());
-        menu.Items.Add("Reconnect", null, (_, _) => StartMonitor());
+        menu.Items.Add("Reconnect", null, (_, _) => QueueMonitorRestart());
         menu.Items.Add("Open diagnostic log", null, (_, _) => DiagnosticLog.Open());
         menu.Items.Add("Exit", null, (_, _) => ExitThread());
         _tray = new NotifyIcon
@@ -55,7 +56,7 @@ internal sealed class TrayContext : ApplicationContext
         }
         if (string.IsNullOrWhiteSpace(_settings.PbxUrl) || !_store.HasSecret)
             OpenSettings();
-        else StartMonitor();
+        else QueueMonitorRestart();
     }
 
     private void ShowError(string text)
@@ -86,23 +87,68 @@ internal sealed class TrayContext : ApplicationContext
                 _store.Save(candidate, form.NewSecret);
                 _settings = candidate;
                 _lastError = "";
-                StartMonitor();
+                QueueMonitorRestart();
             }
             catch (Exception e) { MessageBox.Show(e.Message, "Save failed", MessageBoxButtons.OK, MessageBoxIcon.Error); }
         }
         finally { _editing = false; }
     }
 
-    private void StartMonitor()
+    private void QueueMonitorRestart()
     {
-        _monitorCancel?.Cancel();
-        if (!_store.HasSecret) { ShowError("No API credentials have been saved."); return; }
-        try { _settings.Validate(); }
-        catch (Exception e) { ShowError(e.Message); return; }
-        var cancel = CancellationTokenSource.CreateLinkedTokenSource(_lifetime.Token);
-        _monitorCancel = cancel;
-        var settingsSnapshot = _store.Load();
-        _monitorTask = Task.Run(() => MonitorAsync(settingsSnapshot, cancel.Token));
+        // Serialized restarts: no second KuandoSDK instance is created until
+        // the old monitor has finished and disposed its SDK instance.
+        _ = RestartMonitorAsync();
+    }
+
+    private async Task RestartMonitorAsync()
+    {
+        try
+        {
+            await _monitorGate.WaitAsync(_lifetime.Token);
+            try
+            {
+                if (_lifetime.IsCancellationRequested) return;
+                _monitorCancel?.Cancel();
+                if (_monitorTask is not null)
+                {
+                    try { await _monitorTask; }
+                    catch (OperationCanceledException) { }
+                    catch (Exception ex)
+                    {
+                        DiagnosticLog.Write("Previous monitor stopped with error", DiagnosticLog.SafeError(ex));
+                    }
+                }
+                _monitorCancel?.Dispose();
+                _monitorCancel = null;
+                _monitorTask = null;
+                if (_lifetime.IsCancellationRequested) return;
+                if (!_store.HasSecret)
+                {
+                    ShowError("No API credentials have been saved.");
+                    return;
+                }
+
+                var settingsSnapshot = _store.Load();
+                settingsSnapshot.Validate();
+                var cancel = CancellationTokenSource.CreateLinkedTokenSource(_lifetime.Token);
+                _monitorCancel = cancel;
+                _monitorTask = Task.Run(async () =>
+                {
+                    try { await MonitorAsync(settingsSnapshot, cancel.Token); }
+                    catch (OperationCanceledException) when (cancel.IsCancellationRequested) { }
+                    catch (Exception ex)
+                    {
+                        DiagnosticLog.Write("Monitor failed", DiagnosticLog.SafeError(ex));
+                        _lastError = "Monitor: " + DiagnosticLog.SafeError(ex);
+                    }
+                });
+                _lastError = "";
+            }
+            finally { _monitorGate.Release(); }
+        }
+        catch (OperationCanceledException) when (_lifetime.IsCancellationRequested) { }
+        catch (Exception ex) { ShowError("Monitor start failed: " + DiagnosticLog.SafeError(ex)); }
     }
 
     private async Task MonitorAsync(AppSettings settings, CancellationToken ct)
@@ -119,7 +165,14 @@ internal sealed class TrayContext : ApplicationContext
             DiagnosticLog.Write("kuandoHUB", "Sources registered/refreshed");
         };
         using var callChanges = new SemaphoreSlim(0, 1);
-        void Trigger() { if (Interlocked.Exchange(ref _changesRequested, 1) == 0) { try { callChanges.Release(); } catch (SemaphoreFullException) { } } }
+        int changesRequested = 0;
+        void Trigger()
+        {
+            if (Interlocked.Exchange(ref changesRequested, 1) != 0) return;
+            try { callChanges.Release(); }
+            catch (SemaphoreFullException) { }
+            catch (ObjectDisposedException) { }
+        }
         var wsTask = api.WatchCallEventsAsync(Trigger, ct);
         var lastCallFetch = DateTimeOffset.MinValue;
         string? lastCallValue = null;
@@ -133,10 +186,10 @@ internal sealed class TrayContext : ApplicationContext
 
                 try
                 {
-                    var presence = await api.GetPresenceAsync(ct);
-                    presenceValue = StatusLogic.NormalizePresence(presence.Profile);
+                    var profile = await api.GetPresenceAsync(ct);
+                    presenceValue = StatusLogic.NormalizePresence(profile);
                     if (presenceValue.Length == 0)
-                        throw new InvalidOperationException("Unrecognized 3CX presence profile: " + presence.Profile);
+                        throw new InvalidOperationException("Unrecognized 3CX presence profile.");
                     if (_lastPresence != presenceValue)
                         DiagnosticLog.Write("3CX Presence detected", presenceValue);
                     _lastPresence = presenceValue;
@@ -146,7 +199,7 @@ internal sealed class TrayContext : ApplicationContext
 
                 try
                 {
-                    if (Interlocked.Exchange(ref _changesRequested, 0) == 1 ||
+                    if (Interlocked.Exchange(ref changesRequested, 0) == 1 ||
                         DateTimeOffset.UtcNow - lastCallFetch > TimeSpan.FromSeconds(5))
                     {
                         lastCallValue = await api.GetCallStateAsync(ct);
@@ -205,8 +258,8 @@ internal sealed class TrayContext : ApplicationContext
                             try
                             {
                                 await hub.SendCallAsync(callValue, ct);
-                                callEvents.MarkPublished(callValue); // successful POST only
-                                _lastCallSent = callValue == "Idle" ? "Off" : callValue;
+                                callEvents.MarkPublished(callValue); // SDK call completed successfully
+                                _lastCallSent = callValue;
                                 DiagnosticLog.Write("kuandoHUB 3CX Call sent", _lastCallSent);
                             }
                             catch (OperationCanceledException) when (ct.IsCancellationRequested) { break; }
@@ -231,23 +284,51 @@ internal sealed class TrayContext : ApplicationContext
                     DiagnosticLog.Write("Health", health);
                     _lastDiagnosticHealth = health;
                 }
-                // Never send an artificial Off/unknown color when 3CX cannot be read.
-                await Task.Delay(TimeSpan.FromSeconds(settings.PollSeconds), ct);
+                // The next loop is activated either by a 3CX WebSocket event
+                // or by the periodic fallback poll. No orphaned WaitAsync tasks.
+                await callChanges.WaitAsync(TimeSpan.FromSeconds(settings.PollSeconds), ct);
             }
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested) { }
         finally { try { await wsTask.WaitAsync(TimeSpan.FromSeconds(2)); } catch { } }
     }
 
-    protected override void ExitThreadCore()
+    protected override async void ExitThreadCore()
     {
-        DiagnosticLog.Write("Connector", "Stopped");
+        if (_exiting) return;
+        _exiting = true;
+        DiagnosticLog.Write("Connector", "Stopping");
         _lifetime.Cancel();
         _monitorCancel?.Cancel();
         _displayTimer.Stop();
-        _displayTimer.Dispose();
-        _tray.Visible = false;
-        _tray.Dispose();
-        base.ExitThreadCore();
+        try
+        {
+            await _monitorGate.WaitAsync();
+            try
+            {
+                if (_monitorTask is not null)
+                {
+                    try { await _monitorTask; }
+                    catch (Exception ex)
+                    {
+                        DiagnosticLog.Write("Shutdown", DiagnosticLog.SafeError(ex));
+                    }
+                }
+                _monitorCancel?.Dispose();
+                _monitorCancel = null;
+                _monitorTask = null;
+            }
+            finally { _monitorGate.Release(); }
+        }
+        finally
+        {
+            _displayTimer.Dispose();
+            _tray.Visible = false;
+            _tray.Dispose();
+            _monitorGate.Dispose();
+            _lifetime.Dispose();
+            DiagnosticLog.Write("Connector", "Stopped");
+            base.ExitThreadCore();
+        }
     }
 }
