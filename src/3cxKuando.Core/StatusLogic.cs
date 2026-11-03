@@ -17,6 +17,8 @@ public static class StatusLogic
         var states = new HashSet<string>(rawStates.Where(s => !string.IsNullOrWhiteSpace(s)).Select(s => s!), StringComparer.OrdinalIgnoreCase);
         foreach (string value in new[] { "Connected", "Ringing", "Dialing", "Hold", "Held" })
             if (states.Contains(value)) return value;
+        if (states.Count > 0)
+            throw new InvalidOperationException("3CX Call Control returned only unknown participant statuses.");
         return "Idle";
     }
 }
