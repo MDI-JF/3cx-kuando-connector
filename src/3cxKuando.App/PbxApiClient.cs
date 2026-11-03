@@ -68,7 +68,7 @@ internal sealed class PbxApiClient : IDisposable
         string escaped = _settings.Extension.Replace("'", "''");
         string filter = Uri.EscapeDataString($"Number eq '{escaped}'");
         using var json = await GetAsync(
-            $"/xapi/v1/Users?$filter={filter}&$select=Number,CurrentProfileName&$top=1", ct);
+            $"/xapi/v1/Users?$filter={filter}&$select=CurrentProfileName&$top=1", ct);
         var users = json.RootElement.GetProperty("value");
         if (users.GetArrayLength() != 1)
             throw new InvalidOperationException("3CX XAPI: extension was not found or could not be read.");
