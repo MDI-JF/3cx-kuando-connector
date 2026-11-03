@@ -127,12 +127,15 @@ internal sealed class KuandoHub : IDisposable
             throw new ArgumentException("Unknown event style.", nameof(eventName));
         try
         {
-            // Send the new state first to avoid visible gaps. With SDK global
-            // AutomaticEndEventMode disabled, explicitly retire only the
-            // previous event in this particular channel (never other channels).
+            // Presence is a persistent fallback in kuandoHUB. Updating it
+            // must never EndEvent a previous Presence name: that can remove
+            // the fallback light when higher-priority sources go idle.
+            // Alerts are transient; retire only the previous Alert event.
             _sdk.Send(eventType, eventName, style);
-            if (_activeEvents.TryGetValue(eventType, out var previous) && previous != eventName)
-                _sdk.EndEvent(eventType, previous);
+            if (eventType == HubEvents.Alert &&
+                _activeEvents.TryGetValue(HubEvents.Alert, out var previous) &&
+                previous != eventName)
+                _sdk.EndEvent(HubEvents.Alert, previous);
             _activeEvents[eventType] = eventName;
             DiagnosticLog.Write("kuandoHUB SDK", eventType + " " + eventName);
             return Task.CompletedTask;
