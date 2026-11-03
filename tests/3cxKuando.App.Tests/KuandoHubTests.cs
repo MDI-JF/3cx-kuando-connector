@@ -23,6 +23,7 @@ public sealed class KuandoHubTests
         public readonly List<(string Type, string Name, LightStyle Style)> Effects = [];
         public readonly List<string> Calls = [];
         public int Ends;
+        public readonly List<(string Type, string Name)> Ended = [];
 
         public void RegisterDataSource(BusylightHubDataSourceParameter def)
         {
@@ -41,10 +42,11 @@ public sealed class KuandoHubTests
             if (FailNextEffect) { FailNextEffect = false; throw new InvalidOperationException("effect failed"); }
             Effects.Add((type, name, style));
         }
-        public void EndAlert()
+        public void EndEvent(string type, string name)
         {
-            Calls.Add("End Alert");
+            Calls.Add("End " + type + " " + name);
             if (FailEnd) { FailEnd = false; throw new InvalidOperationException("end failed"); }
+            Ended.Add((type, name));
             Ends++;
         }
         public void Dispose() => Disposed = true;
@@ -112,7 +114,16 @@ public sealed class KuandoHubTests
         Assert.Equal(("Connected", "Light"), (sdk.Effects[2].Name, sdk.Effects[2].Style.Action));
         Assert.Equal(("Hold", "Pulse"), (sdk.Effects[3].Name, sdk.Effects[3].Style.Action));
         Assert.Equal(("Held", "Pulse"), (sdk.Effects[4].Name, sdk.Effects[4].Style.Action));
-        Assert.Equal(1, sdk.Ends);
+        Assert.Equal(new[]
+        {
+            (HubEvents.Alert, "Ringing"),
+            (HubEvents.Alert, "Connected"),
+            (HubEvents.Alert, "Hold"),
+            (HubEvents.Alert, "Held")
+        }, sdk.Ended);
+        Assert.Equal(new LightStyle("Pulse", 100, 100, 0), sdk.Effects[3].Style);
+        Assert.Equal(new LightStyle("Pulse", 100, 100, 0), sdk.Effects[4].Style);
+        Assert.Equal(4, sdk.Ends);
     }
 
     [Fact]
@@ -147,7 +158,7 @@ public sealed class KuandoHubTests
         await Assert.ThrowsAsync<InvalidOperationException>(
             () => hub.SendCallAsync("Idle", CancellationToken.None));
         Assert.Equal(0, sdk.Ends);
-        Assert.DoesNotContain("End Alert", sdk.Calls);
+        Assert.DoesNotContain(sdk.Calls, c => c.StartsWith("End ", StringComparison.Ordinal));
     }
 
     [Fact]
@@ -182,6 +193,7 @@ public sealed class KuandoHubTests
         var sdk = new RecordingSdk();
         using var hub = Create(sdk);
         await hub.SendPresenceAsync("Away", CancellationToken.None);
+        await hub.SendCallAsync("Connected", CancellationToken.None);
         sdk.FailEnd = true;
         var calls = new CallEventState();
         calls.MarkPublished("Connected");
@@ -193,8 +205,64 @@ public sealed class KuandoHubTests
         calls.MarkPublished("Idle");
         Assert.False(calls.ShouldPublish("Idle"));
         Assert.Equal(1, sdk.Ends);
-        Assert.Single(sdk.Effects);
+        Assert.Equal((HubEvents.Alert, "Connected"), Assert.Single(sdk.Ended));
+        Assert.Equal(2, sdk.Effects.Count);
         Assert.Equal(HubEvents.Presence, sdk.Effects[0].Type);
+        Assert.Equal(HubEvents.Alert, sdk.Effects[1].Type);
+    }
+
+    [Fact]
+    public async Task PresenceAndAlertTransitionsOnlyEndTheirOwnPreviousEvent()
+    {
+        var sdk = new RecordingSdk();
+        using var hub = Create(sdk);
+        await hub.SendPresenceAsync("Available", CancellationToken.None);
+        await hub.SendCallAsync("Ringing", CancellationToken.None);
+        await hub.SendPresenceAsync("Away", CancellationToken.None);
+        await hub.SendCallAsync("Connected", CancellationToken.None);
+        Assert.Equal(new[]
+        {
+            (HubEvents.Presence, "Available"),
+            (HubEvents.Alert, "Ringing")
+        }, sdk.Ended);
+        await hub.SendCallAsync("Idle", CancellationToken.None);
+        Assert.Equal((HubEvents.Alert, "Connected"), sdk.Ended[^1]);
+        Assert.DoesNotContain(sdk.Ended, e => e == (HubEvents.Presence, "Away"));
+        Assert.Equal(new[]
+        {
+            "Presence Available", "Alert Ringing", "Presence Away",
+            "End Presence Available", "Alert Connected", "End Alert Ringing",
+            "End Alert Connected"
+        }, sdk.Calls);
+    }
+
+    [Fact]
+    public async Task FailedTransitionRetriesEndOfOldEventBeforeAcknowledgingNewState()
+    {
+        var sdk = new RecordingSdk();
+        using var hub = Create(sdk);
+        await hub.SendCallAsync("Ringing", CancellationToken.None);
+        sdk.FailEnd = true;
+        await Assert.ThrowsAsync<InvalidOperationException>(
+            () => hub.SendCallAsync("Connected", CancellationToken.None));
+        Assert.Empty(sdk.Ended);
+        await hub.SendCallAsync("Connected", CancellationToken.None);
+        Assert.Equal((HubEvents.Alert, "Ringing"), Assert.Single(sdk.Ended));
+        await hub.SendCallAsync("Idle", CancellationToken.None);
+        Assert.Equal((HubEvents.Alert, "Connected"), sdk.Ended[^1]);
+    }
+
+    [Fact]
+    public async Task RepeatedCallStateDoesNotEndItsOwnEvent()
+    {
+        var sdk = new RecordingSdk();
+        using var hub = Create(sdk);
+        await hub.SendCallAsync("Connected", CancellationToken.None);
+        await hub.SendCallAsync("Connected", CancellationToken.None);
+        Assert.Empty(sdk.Ended);
+        await hub.SendCallAsync("Idle", CancellationToken.None);
+        await hub.SendCallAsync("Idle", CancellationToken.None);
+        Assert.Equal((HubEvents.Alert, "Connected"), Assert.Single(sdk.Ended));
     }
 
     [Fact]
