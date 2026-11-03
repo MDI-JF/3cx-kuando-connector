@@ -26,7 +26,7 @@ The previously developed HTTP transport is archived separately in `legacy/http-t
 - An installed, running, SDK-compatible kuandoHUB in **the same Windows user session** as the tray connector
 - Plenom SDK through NuGet (restored at build time). No HTTP API, HTTP port, access token, URL override or manual listener setup is needed.
 
-**Priority safety:** The application integrates via kuandoHUB SDK mode, not direct USB control. Priority entries can be moved in kuandoHUB by the user; verify `Alert` is above `Presence` and that the relative order against Teams/Outlook is appropriate.
+**Priority safety:** The connector checks `IsHubConnected` before sending light effects and requires a running kuandoHUB. The Plenom `KuandoSDK` itself is hybrid: when kuandoHUB is unavailable, it can switch to standalone USB operation. We instantiate it with `slavemode: true` so that initialization and shutdown do not change the light state (according to the SDK XML documentation). **Slave mode does not prevent direct USB fallback**, nor does a prior connection check provide a hard guarantee against a hub disconnect during an SDK call. Priority entries can be moved in kuandoHUB by the user; verify `Alert` is above `Presence` and that the relative order against Teams/Outlook is appropriate.
 
 ## Build and automated tests
 
