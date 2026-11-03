@@ -79,6 +79,8 @@ Credentials are specific to each Windows user. 3CX API client secrets are stored
 
 [PolyForm Noncommercial 1.0.0](LICENSE.md). Commercial use requires the rights holder's permission. The application is source-available, not OSI-open-source, and is not affiliated with 3CX or Plenom.
 
+**Third-party SDK:** `com.plenom.BusylightSDK` 4.0.7 carries Plenom's separate proprietary `license.txt` (Product License Agreement for Busylight UC), including restrictions on third-party integration and redistribution. The project's PolyForm license applies only to the author's own code and does not grant rights to redistribute Plenom's binaries. Obtain written permission from Plenom before publicly distributing installers or deploying the connector commercially; the exact rights for this integration remain unconfirmed.
+
 ## Diagnostics
 
 Tray menu → **Open diagnostic log**. Session-scoped logs are stored under `%LOCALAPPDATA%\3cxKuando\events-session-<session-ID>.log` and rotated to `.log.old` after approximately 512 KB. Logs record 3CX observations, SDK registration, events and connection-health changes, without credentials, API payloads or caller details.
