@@ -12,6 +12,7 @@ public sealed class PlenomHubSdkTests
         public bool IsHubConnected { get; set; } = true;
         public string ActualEventType { get; set; } = "";
         public string ActualEventName { get; set; } = "";
+        public bool AutomaticEndEventMode { get; set; } = false;
         public string LightEventType { get; set; } = "";
         public string BlinkEventType { get; set; } = "";
         public string PulseEventType { get; set; } = "";
@@ -98,15 +99,25 @@ public sealed class PlenomHubSdkTests
     }
 
     [Fact]
-    public void EndingAlertDoesNotSendGlobalOff()
+    public void EndingSpecificAlertDoesNotSendGlobalOff()
     {
         var runtime = new FakeRuntime();
         using var sdk = new PlenomHubSdk(runtime);
-        sdk.EndAlert();
+        sdk.EndEvent(HubEvents.Alert, "Connected");
         Assert.Equal("EndEvent", runtime.LastAction);
         Assert.Equal(HubEvents.Alert, runtime.LastEndType);
-        Assert.Equal("Off", runtime.LastEndName);
-        Assert.Equal(HubEvents.Alert, runtime.ActualEventType);
+        Assert.Equal("Connected", runtime.LastEndName);
+        Assert.NotEqual("Off", runtime.LastEndName);
+    }
+
+    [Fact]
+    public void RejectsInvalidEndEventRequests()
+    {
+        var runtime = new FakeRuntime();
+        using var sdk = new PlenomHubSdk(runtime);
+        Assert.Throws<ArgumentException>(() => sdk.EndEvent("Other", "Connected"));
+        Assert.Throws<ArgumentException>(() => sdk.EndEvent(HubEvents.Alert, " "));
+        Assert.Null(runtime.LastEndName);
     }
 
     [Fact]
