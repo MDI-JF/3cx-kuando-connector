@@ -225,7 +225,7 @@ internal sealed class TrayContext : ApplicationContext
                         await hub.SendCallAsync("Idle", ct);
                         callEvents.MarkPublished("Idle");
                         _lastCallSent = "Off";
-                        DiagnosticLog.Write("kuandoHUB 3CX Call sent", "Off");
+                        DiagnosticLog.Write("kuandoHUB 3CX Call ended", "Alert");
                     }
                     catch (OperationCanceledException) when (ct.IsCancellationRequested) { break; }
                     catch (Exception ex)
@@ -260,7 +260,7 @@ internal sealed class TrayContext : ApplicationContext
                                 await hub.SendCallAsync(callValue, ct);
                                 callEvents.MarkPublished(callValue); // SDK call completed successfully
                                 _lastCallSent = callValue;
-                                DiagnosticLog.Write("kuandoHUB 3CX Call sent", _lastCallSent);
+                                DiagnosticLog.Write("kuandoHUB 3CX Call state", _lastCallSent);
                             }
                             catch (OperationCanceledException) when (ct.IsCancellationRequested) { break; }
                             catch (Exception ex)
