@@ -28,6 +28,17 @@ jobs:
         run: dotnet build 3cxKuando.slnx --configuration Release --no-restore
       - name: Run tests and collect coverage
         run: dotnet test 3cxKuando.slnx --configuration Release --no-build --collect:"XPlat Code Coverage" --results-directory TestResults
+      - name: Summarize line coverage
+        shell: pwsh
+        run: |
+          $reports = @(Get-ChildItem TestResults -Recurse -Filter coverage.cobertura.xml)
+          if ($reports.Count -eq 0) { throw 'No coverage files were produced' }
+          foreach ($file in $reports) {
+            [xml]$xml = Get-Content $file.FullName -Raw
+            $rate = [double]::Parse($xml.coverage.GetAttribute('line-rate'), [System.Globalization.CultureInfo]::InvariantCulture)
+            $modules = @($xml.coverage.packages.package | ForEach-Object { $_.name }) -join ', '
+            '{0}: {1:N1}% line coverage' -f $modules, ($rate * 100) | Write-Host
+          }
       - name: Preserve coverage reports
         uses: actions/upload-artifact@v4
         if: always()
