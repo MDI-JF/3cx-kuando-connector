@@ -61,7 +61,9 @@ Previous development builds may have left old `3CX Presence`, `3CX Call`, or dup
 | Connected | Alert | Light (red) |
 | Hold / Held | Alert | Pulse (yellow) |
 
-The default Hold/Held color is yellow on the 0–100 RGB scale (`100, 100, 0`). Older saved configuration files are upgraded from the previous default red Pulse (`100, 0, 0`) when loaded. Explicitly different custom colors or effects are preserved. A custom style identical to the old default cannot be distinguished from that default and will also be migrated.\n\n**Light** is steady illumination. **Blink** alternates between illuminated and off phases; by default the SDK receives values `5, 5` for on/off timing. **Pulse** gradually changes intensity using a seven-step sequence (3, 21, 36, 50, 36, 21, 10). Effect colors are specified on the same 0–100 scale as the existing configuration.
+The default Hold/Held color is yellow on the 0–100 RGB scale (`100, 100, 0`). Older saved configuration files are upgraded from the previous default red Pulse (`100, 0, 0`) when loaded. Explicitly different custom colors or effects are preserved. A custom style identical to the old default cannot be distinguished from that default and will also be migrated.
+
+**Light** is steady illumination. **Blink** alternates between illuminated and off phases; by default the SDK receives values `5, 5` for on/off timing. **Pulse** gradually changes intensity using a seven-step sequence (3, 21, 36, 50, 36, 21, 10). Effect colors are specified on the same 0–100 scale as the existing configuration.
 
 When a call completes, the application uses the SDK's `EndEvent` for the `Alert` event type, without clearing `Presence`. `Off` is **not** a selectable call state or registered event name. No artificial Off is emitted at startup or on a failed 3CX read. Active calls are replayed after successful hub re-registration; a successfully ended call is not replayed.
 
