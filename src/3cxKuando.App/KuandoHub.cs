@@ -127,15 +127,21 @@ internal sealed class KuandoHub : IDisposable
             throw new ArgumentException("Unknown event style.", nameof(eventName));
         try
         {
-            // Presence is a persistent fallback in kuandoHUB. Updating it
-            // must never EndEvent a previous Presence name: that can remove
-            // the fallback light when higher-priority sources go idle.
-            // Alerts are transient; retire only the previous Alert event.
-            _sdk.Send(eventType, eventName, style);
+            // Presence is a persistent fallback in kuandoHUB and must never
+            // be ended. Alert is transient and must never be ended *after*
+            // sending its replacement: EndEvent may clear the currently active
+            // Alert channel, leaving only Presence visible on the device.
             if (eventType == HubEvents.Alert &&
                 _activeEvents.TryGetValue(HubEvents.Alert, out var previous) &&
                 previous != eventName)
+            {
                 _sdk.EndEvent(HubEvents.Alert, previous);
+                // Record completion immediately so a failed Send can retry
+                // the new event without treating the old one as still active.
+                _activeEvents.Remove(HubEvents.Alert);
+            }
+
+            _sdk.Send(eventType, eventName, style);
             _activeEvents[eventType] = eventName;
             DiagnosticLog.Write("kuandoHUB SDK", eventType + " " + eventName);
             return Task.CompletedTask;
