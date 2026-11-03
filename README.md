@@ -65,7 +65,11 @@ The default Hold/Held color is yellow on the 0–100 RGB scale (`100, 100, 0`). 
 
 **Light** is steady illumination. **Blink** alternates between illuminated and off phases; by default the SDK receives values `5, 5` for on/off timing. **Pulse** gradually changes intensity using a seven-step sequence (3, 21, 36, 50, 36, 21, 10). Effect colors are specified on the same 0–100 scale as the existing configuration.
 
-When a call completes, the application uses the SDK's `EndEvent("Alert", previousEventName)` for the last active event (such as `Connected`), without clearing `Presence`. When an event changes within a channel, only the previous event in that same channel is ended. The SDK's global `AutomaticEndEventMode` is disabled to prevent call events from clearing presence events. `Off` is **not** a selectable call state or registered event name and is never sent as an event name. No artificial ending is emitted at startup or on a failed 3CX read. Active calls are replayed after successful hub re-registration; a successfully ended call is not replayed.
+**Persistent presence fallback:** The current `Presence` event is a permanent baseline in kuandoHUB. A new presence profile is sent as an update, but the connector never invokes `EndEvent` for the `Presence` channel, including when the profile changes. This prevents clearing the fallback illumination when other data sources become idle. On reconnect the current profile is sent again; resetting the local deduplication checkpoint does not end a hub event.
+
+**Transient call alerts:** When a call completes, the application uses the SDK's `EndEvent("Alert", previousEventName)` for the last active event (such as `Connected`). On call-state transitions, only the previous `Alert` is ended. The SDK's global `AutomaticEndEventMode` remains disabled so an alert cannot clear presence. `Off` is not a selectable or registered event name. No artificial ending is emitted at startup or on a failed 3CX read.
+
+**Hardware validation:** Confirm in kuandoHUB that replacing a Presence profile does not leave several old Presence events occupying priority slots. This depends on the hub's event replacement behavior and cannot be proven by SDK mocks.
 
 Monitor restarts are serialized: the previous 3CX/WebSocket/SDK monitor must be stopped before a new SDK instance starts. Invalid or unknown Call Control responses are treated as errors (not as `Idle`), avoiding inadvertent call-priority removal.
 
