@@ -1,7 +1,35 @@
+using System.Text.Json;
+
 namespace KuandoConnector.Core;
 
 public sealed class AppSettings
 {
+    // Distinguishes original saved color defaults from user overrides applied later.
+    public int SettingsSchemaVersion { get; set; } = 2;
+
+    /// <summary>
+    /// Legacy configuration files contain serialized default colors but no
+    /// schema version. Upgrade only the previous factory-default red Hold/Held
+    /// effects, preserving any other customized color or action.
+    /// </summary>
+    public static AppSettings FromJson(string json)
+    {
+        using var doc = JsonDocument.Parse(json);
+        var settings = JsonSerializer.Deserialize<AppSettings>(json) ?? new AppSettings();
+        if (!doc.RootElement.TryGetProperty(nameof(SettingsSchemaVersion), out _))
+        {
+            if (settings.EventStyles is not null)
+            {
+                foreach (var state in new[] { "Hold", "Held" })
+                    if (settings.EventStyles.TryGetValue(state, out var previous) &&
+                        previous == new LightStyle("Pulse", 100, 0, 0))
+                        settings.EventStyles[state] = new LightStyle("Pulse", 100, 100, 0);
+            }
+            settings.SettingsSchemaVersion = 2;
+        }
+        return settings;
+    }
+
     public string PbxUrl { get; set; } = "";
     public string ClientId { get; set; } = "";
     public string Extension { get; set; } = "";
@@ -45,7 +73,7 @@ public static class DefaultStyles
         ["Dialing"] = new("Light", 0, 40, 100),
         ["Ringing"] = new("Blink", 0, 40, 100),
         ["Connected"] = new("Light", 100, 0, 0),
-        ["Hold"] = new("Pulse", 100, 0, 0),
-        ["Held"] = new("Pulse", 100, 0, 0)
+        ["Hold"] = new("Pulse", 100, 100, 0),
+        ["Held"] = new("Pulse", 100, 100, 0)
     };
 }
