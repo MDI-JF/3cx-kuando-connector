@@ -13,6 +13,7 @@ internal sealed class KuandoHub : IDisposable
     private readonly AppSettings _settings;
     private readonly RegistrationLease _registration;
     private bool _disposed;
+    private readonly Dictionary<string, string> _activeEvents = new(StringComparer.Ordinal);
 
     public KuandoHub(AppSettings settings)
         : this(new PlenomHubSdk(), settings, new RegistrationLease()) { }
@@ -98,8 +99,12 @@ internal sealed class KuandoHub : IDisposable
         }
         try
         {
-            _sdk.EndAlert();
-            DiagnosticLog.Write("kuandoHUB SDK", "End Alert");
+            if (_activeEvents.TryGetValue(HubEvents.Alert, out var active))
+            {
+                _sdk.EndEvent(HubEvents.Alert, active);
+                _activeEvents.Remove(HubEvents.Alert);
+                DiagnosticLog.Write("kuandoHUB SDK", "Ended Alert " + active);
+            }
             return Task.CompletedTask;
         }
         catch
@@ -122,7 +127,13 @@ internal sealed class KuandoHub : IDisposable
             throw new ArgumentException("Unknown event style.", nameof(eventName));
         try
         {
+            // Send the new state first to avoid visible gaps. With SDK global
+            // AutomaticEndEventMode disabled, explicitly retire only the
+            // previous event in this particular channel (never other channels).
             _sdk.Send(eventType, eventName, style);
+            if (_activeEvents.TryGetValue(eventType, out var previous) && previous != eventName)
+                _sdk.EndEvent(eventType, previous);
+            _activeEvents[eventType] = eventName;
             DiagnosticLog.Write("kuandoHUB SDK", eventType + " " + eventName);
             return Task.CompletedTask;
         }
