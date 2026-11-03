@@ -43,7 +43,8 @@ internal sealed class PbxApiClient : IDisposable
             _token = root.GetProperty("access_token").GetString()
                 ?? throw new InvalidOperationException("3CX hat kein OAuth-Token geliefert.");
             var expires = root.TryGetProperty("expires_in", out var lifetime) ? lifetime.GetInt32() : 3600;
-            _renewAt = DateTimeOffset.UtcNow.AddSeconds(Math.Max(5, expires - 120));
+            var renewAfter = expires > 180 ? expires - 120 : Math.Max(1, expires / 2);
+            _renewAt = DateTimeOffset.UtcNow.AddSeconds(renewAfter);
             return _token;
         }
         finally { _lock.Release(); }
@@ -81,10 +82,16 @@ internal sealed class PbxApiClient : IDisposable
     {
         using var json = await GetAsync("/callcontrol/" + Uri.EscapeDataString(_settings.Extension), ct);
         if (!json.RootElement.TryGetProperty("participants", out var participants) ||
-            participants.ValueKind != JsonValueKind.Array) return "Idle";
-        var states = participants.EnumerateArray()
-            .Where(p => p.TryGetProperty("status", out _))
-            .Select(p => p.GetProperty("status").GetString());
+            participants.ValueKind != JsonValueKind.Array)
+            throw new InvalidOperationException("3CX Call Control: participants array is missing.");
+        var states = participants.EnumerateArray().Select(p =>
+        {
+            if (p.ValueKind != JsonValueKind.Object ||
+                !p.TryGetProperty("status", out var status) ||
+                status.ValueKind != JsonValueKind.String)
+                throw new InvalidOperationException("3CX Call Control: participant status is missing.");
+            return status.GetString();
+        });
         return StatusLogic.SelectCallState(states);
     }
 
