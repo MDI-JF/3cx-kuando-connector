@@ -18,7 +18,7 @@ internal sealed class UserSettingsStore
     public AppSettings Load()
     {
         if (!File.Exists(SettingsPath)) return new AppSettings();
-        return JsonSerializer.Deserialize<AppSettings>(File.ReadAllText(SettingsPath)) ?? new AppSettings();
+        return AppSettings.FromJson(File.ReadAllText(SettingsPath));
     }
 
     public bool HasSecret => File.Exists(SecretPath);
